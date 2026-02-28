@@ -15,6 +15,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DEFAULT_CONSTRAINTS = void 0;
+require("dotenv/config");
 __exportStar(require("./database"), exports);
 // Default constraints for new sessions
 exports.DEFAULT_CONSTRAINTS = {

@@ -63,6 +63,17 @@ export interface BlendPropertyRow {
   added_at: string;
 }
 
+export type JoinRequestStatus = "pending" | "accepted" | "declined";
+
+export interface BlendJoinRequestRow {
+  id: string;
+  blend_id: string;
+  user_id: string;
+  email: string | null;
+  status: JoinRequestStatus;
+  created_at: string;
+}
+
 // ─── Insert shapes (required fields only; defaults are optional) ───────────────
 
 export interface PropertyInsert {
@@ -159,6 +170,11 @@ export interface Database {
         Insert: BlendPropertyInsert;
         Update: Partial<BlendPropertyInsert>;
       };
+      blend_join_requests: {
+        Row: BlendJoinRequestRow;
+        Insert: { blend_id: string; user_id: string; email?: string | null; status?: JoinRequestStatus };
+        Update: { status?: JoinRequestStatus };
+      };
     };
     Enums: {
       listing_source: ListingSource;
@@ -179,8 +195,9 @@ export interface BlendPropertyWithProperty extends BlendPropertyRow {
   properties: PropertyWithFloorplans;
 }
 
-/** A blend with members and saved properties fully joined */
+/** A blend with members, saved properties, and join requests fully joined */
 export interface BlendWithDetails extends BlendRow {
   blend_members: BlendMemberRow[];
   blend_properties: BlendPropertyWithProperty[];
+  blend_join_requests: BlendJoinRequestRow[];
 }

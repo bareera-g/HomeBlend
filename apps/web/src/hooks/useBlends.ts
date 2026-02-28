@@ -20,7 +20,8 @@ export function useBlends() {
         blend_properties(
           *,
           properties(*, floorplans(*))
-        )
+        ),
+        blend_join_requests(*)
       `)
       .order("created_at", { ascending: false });
 
@@ -82,26 +83,27 @@ export async function removePropertyFromBlend(
   return { error: error?.message ?? null };
 }
 
-export async function joinBlendByCode(
+/** Sends a join request to the blend owner instead of joining directly. */
+export async function requestJoinBlend(
   inviteCode: string,
-  userId: string
 ): Promise<{ blendId: string | null; error: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: blend, error: findErr } = await (supabase as any)
-    .from("blends")
-    .select("id")
-    .eq("invite_code", inviteCode.toUpperCase())
-    .single();
+  const { data, error } = await (supabase as any)
+    .rpc("request_join_blend", { p_invite_code: inviteCode });
 
-  if (findErr || !blend) return { blendId: null, error: "Blend not found" };
+  if (error) console.error("[requestJoinBlend]", error);
+  return { blendId: data ?? null, error: error?.message ?? null };
+}
 
+/** Owner accepts or declines a pending join request. */
+export async function respondToJoinRequest(
+  requestId: string,
+  accept: boolean,
+): Promise<{ error: string | null }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error: joinErr } = await (supabase as any)
-    .from("blend_members")
-    .upsert(
-      { blend_id: blend.id, user_id: userId, role: "member" },
-      { onConflict: "blend_id,user_id" }
-    );
+  const { error } = await (supabase as any)
+    .rpc("respond_join_request", { p_request_id: requestId, p_accept: accept });
 
-  return { blendId: blend.id, error: joinErr?.message ?? null };
+  if (error) console.error("[respondToJoinRequest]", error);
+  return { error: error?.message ?? null };
 }
