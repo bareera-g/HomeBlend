@@ -15,6 +15,7 @@ import type {
   PropertyWithFloorplans,
 } from "@homeblend/types";
 import NavBar from "../components/NavBar";
+import { supabase } from "../lib/supabase";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -235,6 +236,77 @@ function SavedPropertyCard({
   );
 }
 
+// ─── Recommended property card ────────────────────────────────────────────────
+
+function RecommendedPropertyCard({
+  property,
+  reasons,
+}: {
+  property: PropertyWithFloorplans;
+  reasons: string[];
+}) {
+  const imageUrl  = (property.raw as Record<string, unknown>)?.image_url as string | undefined;
+  const address   = (property.raw as Record<string, unknown>)?.address as string | undefined;
+  const minRent   = property.floorplans.length > 0
+    ? Math.min(...property.floorplans.map((f) => f.rent))
+    : null;
+  const maxRent   = property.floorplans.length > 0
+    ? Math.max(...property.floorplans.map((f) => f.rent))
+    : null;
+  const bedSet    = [...new Set(property.floorplans.map((f) => f.beds))].sort((a, b) => a - b);
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-sm">
+      {/* Image strip */}
+      <div className="h-28 bg-gray-100 relative overflow-hidden">
+        {imageUrl ? (
+          <img src={imageUrl} alt={property.name} className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center text-3xl">🏠</div>
+        )}
+        {/* "Recommended" badge */}
+        <div className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-600 text-white text-xs font-bold shadow">
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+          </svg>
+          For you
+        </div>
+      </div>
+
+      <div className="px-3 py-2.5 space-y-1.5">
+        {/* Name + location */}
+        <div>
+          <p className="text-sm font-bold text-gray-900 truncate">{property.name}</p>
+          <p className="text-xs text-gray-400 truncate">{address ?? `${property.city}, ${property.state}`}</p>
+        </div>
+
+        {/* Rent + beds */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {minRent !== null && (
+            <span className="text-xs font-semibold text-gray-700">
+              ${minRent.toLocaleString()}{maxRent !== minRent ? `–$${maxRent!.toLocaleString()}` : ""}/mo
+            </span>
+          )}
+          {bedSet.length > 0 && (
+            <span className="text-xs text-gray-400">{bedSet.join(", ")} bd</span>
+          )}
+        </div>
+
+        {/* Match reasons */}
+        {reasons.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-0.5">
+            {reasons.map((r, i) => (
+              <span key={i} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-full text-xs font-medium">
+                {r}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Insights panel ───────────────────────────────────────────────────────────
 
 function BlendInsights({
@@ -246,12 +318,36 @@ function BlendInsights({
 }) {
   const hasProperties = (blend.blend_properties?.length ?? 0) > 0;
 
-  // Per-member stats derived from votes
-  const memberMap = new Map<string, { email: string | null; likes: number; dislikes: number }>();
+  // Build a quick property-id → name lookup from blend data
+  const propertyNameMap = new Map<string, string>();
+  for (const bp of blend.blend_properties ?? []) {
+    propertyNameMap.set(bp.property_id, bp.properties.name);
+  }
+
+  // Per-member stats derived from votes, including which properties they liked/disliked
+  const memberMap = new Map<string, {
+    email: string | null;
+    likes: number;
+    dislikes: number;
+    likedProps: string[];    // property names
+    dislikedProps: string[]; // property names
+  }>();
   for (const v of votes) {
-    const m = memberMap.get(v.user_id) ?? { email: v.email, likes: 0, dislikes: 0 };
-    if (v.vote === "like") m.likes += 1;
-    else m.dislikes += 1;
+    const m = memberMap.get(v.user_id) ?? {
+      email: v.email,
+      likes: 0,
+      dislikes: 0,
+      likedProps: [],
+      dislikedProps: [],
+    };
+    const propName = propertyNameMap.get(v.property_id) ?? "Unknown property";
+    if (v.vote === "like") {
+      m.likes += 1;
+      m.likedProps.push(propName);
+    } else {
+      m.dislikes += 1;
+      m.dislikedProps.push(propName);
+    }
     memberMap.set(v.user_id, m);
   }
 
@@ -274,24 +370,73 @@ function BlendInsights({
           <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Member Activity</h3>
           <div className="space-y-2">
             {Array.from(memberMap.entries()).map(([uid, m]) => {
-              const total = m.likes + m.dislikes;
+              const total   = m.likes + m.dislikes;
               const likePct = total > 0 ? m.likes / total : 0;
               return (
-                <div key={uid} className="bg-white rounded-xl border border-gray-100 p-3 flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
-                    {(m.email?.[0] ?? "?").toUpperCase()}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{m.email ?? "Member"}</p>
-                    <p className="text-xs text-gray-400">{m.likes} liked · {m.dislikes} passed</p>
-                  </div>
-                  <div className="shrink-0 w-16">
-                    <div className="flex rounded-full overflow-hidden h-1.5 bg-gray-100">
-                      <div className="bg-emerald-400 h-full transition-all" style={{ width: `${likePct * 100}%` }} />
-                      <div className="bg-red-300 h-full transition-all" style={{ width: `${(1 - likePct) * 100}%` }} />
+                <div key={uid} className="bg-white rounded-xl border border-gray-100 p-3 space-y-2.5">
+                  {/* ── Top row: avatar + name + bar ── */}
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                      {(m.email?.[0] ?? "?").toUpperCase()}
                     </div>
-                    <p className="text-xs text-gray-400 text-right mt-0.5">{Math.round(likePct * 100)}%</p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{m.email ?? "Member"}</p>
+                      <p className="text-xs text-gray-400">{m.likes} liked · {m.dislikes} passed</p>
+                    </div>
+                    <div className="shrink-0 w-16">
+                      <div className="flex rounded-full overflow-hidden h-1.5 bg-gray-100">
+                        <div className="bg-emerald-400 h-full transition-all" style={{ width: `${likePct * 100}%` }} />
+                        <div className="bg-red-300 h-full transition-all" style={{ width: `${(1 - likePct) * 100}%` }} />
+                      </div>
+                      <p className="text-xs text-gray-400 text-right mt-0.5">{Math.round(likePct * 100)}%</p>
+                    </div>
                   </div>
+
+                  {/* ── Liked properties ── */}
+                  {m.likedProps.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-emerald-600 flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                        </svg>
+                        Liked
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {m.likedProps.map((name, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-full text-xs font-medium truncate max-w-[160px]"
+                            title={name}
+                          >
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Disliked properties ── */}
+                  {m.dislikedProps.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-red-400 flex items-center gap-1">
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                        </svg>
+                        Passed
+                      </p>
+                      <div className="flex flex-wrap gap-1">
+                        {m.dislikedProps.map((name, i) => (
+                          <span
+                            key={i}
+                            className="px-2 py-0.5 bg-red-50 text-red-500 border border-red-100 rounded-full text-xs font-medium truncate max-w-[160px]"
+                            title={name}
+                          >
+                            {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -364,6 +509,221 @@ function ShareModal({ blend, onClose }: { blend: BlendWithDetails; onClose: () =
   );
 }
 
+// ─── AI Analysis Banner ────────────────────────────────────────────────────────
+
+function AIAnalysisBanner({
+  blend,
+  votes,
+}: {
+  blend: BlendWithDetails;
+  votes: BlendPropertyVoteRow[];
+}) {
+  const [open,     setOpen]     = useState(true);
+  const [loading,  setLoading]  = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+
+  const props   = blend.blend_properties ?? [];
+  const members = blend.blend_members ?? [];
+
+  function generateAnalysis() {
+    setLoading(true);
+    setAnalysis(null);
+
+    const totalVotes = votes.length;
+    const scored = props.map((bp) => {
+      const v = votes.filter((v) => v.property_id === bp.property_id);
+      return { name: bp.properties.name, score: v.filter((x) => x.vote === "like").length - v.filter((x) => x.vote === "dislike").length };
+    }).sort((a, b) => b.score - a.score);
+    const top       = scored[0];
+    const likes     = votes.filter((v) => v.vote === "like").length;
+    const consensus = totalVotes > 0 ? Math.round((likes / totalVotes) * 100) : null;
+    const rents     = props.flatMap((bp) => bp.properties.floorplans.map((f) => f.rent));
+    const avgRent   = rents.length > 0 ? Math.round(rents.reduce((a, b) => a + b, 0) / rents.length) : null;
+
+    setTimeout(() => {
+      let text = "";
+      if (props.length === 0) {
+        text = "No properties have been added yet. Start by saving listings from the Discover page.";
+      } else if (totalVotes === 0) {
+        text = `This blend has ${props.length} propert${props.length === 1 ? "y" : "ies"} and ${members.length} member${members.length === 1 ? "" : "s"}, but no votes have been cast yet. Encourage members to like or pass on listings to generate a recommendation.`;
+      } else {
+        const parts: string[] = [];
+        if (top && top.score > 0) parts.push(`The group is leaning towards **${top.name}** with a score of +${top.score}.`);
+        else if (top && top.score < 0) parts.push(`No clear favourite yet — the top-ranked property has a score of ${top.score}.`);
+        else parts.push(`The group is split — votes are tied across properties.`);
+        if (consensus !== null) parts.push(`${consensus}% of all votes are positive, indicating ${consensus >= 60 ? "strong" : consensus >= 40 ? "moderate" : "low"} group enthusiasm.`);
+        if (avgRent !== null) parts.push(`The average rent across all floor plans is $${avgRent.toLocaleString()}/mo.`);
+        if (members.length > 1) parts.push(`With ${members.length} members voting, this blend has good coverage for a group decision.`);
+        text = parts.join(" ");
+      }
+      setAnalysis(text);
+      setLoading(false);
+    }, 900);
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="flex-1 min-w-0 rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-indigo-50 overflow-hidden flex flex-col">
+      <div className="px-4 py-3 flex items-center gap-2 border-b border-violet-100">
+        <div className="w-6 h-6 rounded-lg bg-violet-600 flex items-center justify-center shrink-0">
+          <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-bold text-violet-800">AI Analysis</p>
+          <p className="text-xs text-violet-400">Temporary placeholder</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={generateAnalysis}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold transition-colors disabled:opacity-60"
+          >
+            {loading
+              ? <span className="w-3 h-3 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+              : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>}
+            {analysis ? "Regenerate" : "Analyse"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="w-6 h-6 rounded-full hover:bg-violet-100 flex items-center justify-center text-violet-400 transition-colors text-sm leading-none"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+      <div className="px-4 py-3 flex-1 flex items-start">
+        {loading ? (
+          <div className="flex items-center gap-2 text-violet-400 text-xs">
+            <span className="w-3.5 h-3.5 border-2 border-violet-300 border-t-violet-600 rounded-full animate-spin shrink-0" />
+            Analysing blend data…
+          </div>
+        ) : analysis ? (
+          <p className="text-xs text-violet-900 leading-relaxed">
+            {analysis.split("**").map((part, i) =>
+              i % 2 === 1 ? <strong key={i}>{part}</strong> : part
+            )}
+          </p>
+        ) : (
+          <p className="text-xs text-violet-400 italic">
+            Click "Analyse" to generate an AI summary of this blend.
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Conflict Analysis Banner ──────────────────────────────────────────────────
+
+function ConflictAnalysisBanner({
+  blend,
+  votes,
+}: {
+  blend: BlendWithDetails;
+  votes: BlendPropertyVoteRow[];
+}) {
+  const [open, setOpen] = useState(true);
+
+  const props = blend.blend_properties ?? [];
+
+  const conflictData = props
+    .map((bp) => {
+      const propVotes = votes.filter((v) => v.property_id === bp.property_id);
+      const likers    = propVotes.filter((v) => v.vote === "like");
+      const dislikers = propVotes.filter((v) => v.vote === "dislike");
+      const conflict  = Math.min(likers.length, dislikers.length);
+      return { bp, likers, dislikers, conflict };
+    })
+    .filter((d) => d.conflict > 0)
+    .sort((a, b) => b.conflict - a.conflict);
+
+  if (!open) return null;
+
+  return (
+    <div className="flex-1 min-w-0 rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50 to-orange-50 overflow-hidden flex flex-col">
+      <div className="px-4 py-3 flex items-center gap-2 border-b border-rose-100">
+        <div className="w-6 h-6 rounded-lg bg-rose-500 flex items-center justify-center shrink-0">
+          <svg className="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-bold text-rose-800 flex items-center gap-1.5">
+            Conflict Analysis
+            {conflictData.length > 0 && (
+              <span className="px-1.5 py-0.5 bg-rose-100 text-rose-600 rounded-full text-xs font-bold leading-none">
+                {conflictData.length}
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-rose-400">Properties with opposing votes</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="w-6 h-6 rounded-full hover:bg-rose-100 flex items-center justify-center text-rose-400 transition-colors text-sm leading-none shrink-0"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="px-4 py-3 flex-1">
+        {votes.length === 0 ? (
+          <p className="text-xs text-rose-300 italic">No votes yet — cast some votes to detect conflicts.</p>
+        ) : conflictData.length === 0 ? (
+          <div className="flex items-center gap-2 text-xs text-emerald-600">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            No conflicts — the group is aligned on all properties.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {conflictData.map(({ bp, likers, dislikers, conflict }) => (
+              <div key={bp.id}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-gray-800 truncate flex-1 mr-2">{bp.properties.name}</p>
+                  <span className="text-xs font-bold text-rose-500 shrink-0">
+                    {conflict} conflict{conflict > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1">
+                    <svg className="w-3 h-3 text-emerald-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+                    </svg>
+                    {likers.map((v) => (
+                      <VoterAvatar key={v.id} label={(v.email?.[0] ?? "?").toUpperCase()} title={v.email ?? v.user_id} color="green" />
+                    ))}
+                  </div>
+                  <span className="text-gray-300 text-xs">vs</span>
+                  <div className="flex items-center gap-1">
+                    <svg className="w-3 h-3 text-red-400 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+                    </svg>
+                    {dislikers.map((v) => (
+                      <VoterAvatar key={v.id} label={(v.email?.[0] ?? "?").toUpperCase()} title={v.email ?? v.user_id} color="red" />
+                    ))}
+                  </div>
+                  <div className="flex-1 h-1 rounded-full overflow-hidden bg-gray-100 flex ml-1">
+                    <div className="bg-emerald-400 h-full" style={{ width: `${(likers.length / (likers.length + dislikers.length)) * 100}%` }} />
+                    <div className="bg-red-300 h-full" style={{ width: `${(dislikers.length / (likers.length + dislikers.length)) * 100}%` }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Detail View ──────────────────────────────────────────────────────────────
 
 function BlendDetail({
@@ -377,9 +737,13 @@ function BlendDetail({
   onBack: () => void;
   onReload: () => void;
 }) {
-  const [shareOpen,      setShareOpen]      = useState(false);
-  const [removing,       setRemoving]       = useState<string | null>(null);
-  const [responding,     setResponding]     = useState<string | null>(null);
+  const [shareOpen,        setShareOpen]        = useState(false);
+  const [removing,         setRemoving]         = useState<string | null>(null);
+  const [responding,       setResponding]       = useState<string | null>(null);
+  const [leaderboardTab,   setLeaderboardTab]   = useState<"blend" | "recommended">("blend");
+  const [recommended,      setRecommended]      = useState<{ property: PropertyWithFloorplans; reasons: string[] }[]>([]);
+  const [recsLoading,      setRecsLoading]      = useState(false);
+  const [recsFetched,      setRecsFetched]      = useState(false);
   const [optimisticVotes, setOptimisticVotes] = useState<BlendPropertyVoteRow[]>(
     blend.blend_property_votes ?? []
   );
@@ -394,6 +758,81 @@ function BlendDetail({
 
   const isOwner         = blend.created_by === userId;
   const pendingRequests = blend.blend_join_requests?.filter((r) => r.status === "pending") ?? [];
+
+  // Properties this user has not yet voted on
+  const votedPropertyIds = new Set(
+    (blend.blend_property_votes ?? [])
+      .filter((v) => v.user_id === userId)
+      .map((v) => v.property_id)
+  );
+  const unvotedCount = (blend.blend_properties ?? []).filter(
+    (bp) => !votedPropertyIds.has(bp.property_id)
+  ).length;
+
+  // Fetch and score recommendations when that tab is first opened
+  useEffect(() => {
+    if (leaderboardTab !== "recommended" || recsFetched) return;
+
+    const blendProps = blend.blend_properties ?? [];
+    if (blendProps.length === 0) {
+      setRecsFetched(true);
+      return;
+    }
+
+    setRecsLoading(true);
+
+    // Build a profile from the existing blend properties
+    const allFloorplans  = blendProps.flatMap((bp) => bp.properties.floorplans);
+    const avgRent        = allFloorplans.length > 0
+      ? allFloorplans.reduce((s, f) => s + f.rent, 0) / allFloorplans.length
+      : 0;
+    const cityFreq       = new Map<string, number>();
+    blendProps.forEach((bp) => cityFreq.set(bp.properties.city, (cityFreq.get(bp.properties.city) ?? 0) + 1));
+    const topCity        = [...cityFreq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+    const bedFreq        = new Map<number, number>();
+    allFloorplans.forEach((f) => bedFreq.set(f.beds, (bedFreq.get(f.beds) ?? 0) + 1));
+    const topBeds        = [...bedFreq.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 1;
+    const existingIds    = new Set(blendProps.map((bp) => bp.property_id));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any)
+      .from("properties")
+      .select("*, floorplans(*)")
+      .eq("status", "active")
+      .then(({ data }: { data: PropertyWithFloorplans[] | null }) => {
+        const candidates = (data ?? []).filter((p) => !existingIds.has(p.id));
+
+        const scored = candidates.map((p) => {
+          const reasons: string[] = [];
+          let score = 0;
+
+          if (p.city === topCity) { score += 3; reasons.push("Same city"); }
+
+          const pAvgRent = p.floorplans.length > 0
+            ? p.floorplans.reduce((s, f) => s + f.rent, 0) / p.floorplans.length
+            : 0;
+          if (avgRent > 0 && pAvgRent > 0 && Math.abs(pAvgRent - avgRent) / avgRent <= 0.20) {
+            score += 2; reasons.push("Similar rent");
+          }
+
+          if (p.floorplans.some((f) => f.beds === topBeds)) {
+            score += 2; reasons.push(`${topBeds} bd match`);
+          }
+
+          return { property: p, reasons, score };
+        });
+
+        const top = scored
+          .filter((x) => x.score > 0)
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 8)
+          .map(({ property, reasons }) => ({ property, reasons }));
+
+        setRecommended(top);
+        setRecsLoading(false);
+        setRecsFetched(true);
+      });
+  }, [leaderboardTab, recsFetched, blend.blend_properties]);
 
   async function handleRemove(propertyId: string) {
     setRemoving(propertyId);
@@ -480,6 +919,45 @@ function BlendDetail({
         </button>
       </div>
 
+      {/* ── Unvoted prompt ── */}
+      {unvotedCount > 0 && (
+        <div className="shrink-0 mx-5 mt-3">
+          <button
+            type="button"
+            disabled
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white cursor-default select-none shadow-sm"
+          >
+            {/* Swipe icon */}
+            <div className="shrink-0 w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11" />
+              </svg>
+            </div>
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-sm font-bold leading-tight">
+                {unvotedCount} propert{unvotedCount === 1 ? "y" : "ies"} waiting for your vote
+              </p>
+              <p className="text-xs text-blue-200 mt-0.5">Swipe through listings to share your opinion</p>
+            </div>
+            {/* Animated chevrons suggesting swipe */}
+            <div className="shrink-0 flex items-center gap-0.5 opacity-70">
+              {[0, 1, 2].map((i) => (
+                <svg
+                  key={i}
+                  className="w-4 h-4 text-white"
+                  style={{ opacity: 0.4 + i * 0.3 }}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
+                </svg>
+              ))}
+            </div>
+          </button>
+        </div>
+      )}
+
       {/* ── Join Requests (owner only) ── */}
       {isOwner && pendingRequests.length > 0 && (
         <div className="shrink-0 px-5 py-3 border-b border-amber-100 bg-amber-50">
@@ -529,15 +1007,50 @@ function BlendDetail({
         </div>
       )}
 
+      {/* ── Analysis banners ── */}
+      <div className="shrink-0 mx-5 mt-3 mb-1 flex gap-3">
+        <AIAnalysisBanner blend={blend} votes={optimisticVotes} />
+        <ConflictAnalysisBanner blend={blend} votes={optimisticVotes} />
+      </div>
+
       {/* ── Two-column body: properties left, insights right ── */}
       <div className="flex-1 flex overflow-hidden min-h-0">
 
-        {/* Left — property list with voting */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 min-w-0">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
-            Properties
-            {(blend.blend_members?.length ?? 0) > 0 && (
-              <span className="ml-2 inline-flex items-center gap-1 normal-case font-normal text-gray-400">
+        {/* Left — leaderboard / recommendations */}
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+
+          {/* Tab bar */}
+          <div className="shrink-0 px-5 pt-4 pb-0 flex items-center gap-1 border-b border-gray-100">
+            {([
+              { id: "blend",       label: "In Blend",       count: blend.blend_properties?.length ?? 0 },
+              { id: "recommended", label: "Recommended",    count: null },
+            ] as const).map(({ id, label, count }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setLeaderboardTab(id)}
+                className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 transition-colors ${
+                  leaderboardTab === id
+                    ? "border-blue-600 text-blue-700"
+                    : "border-transparent text-gray-400 hover:text-gray-600"
+                }`}
+              >
+                {label}
+                {count !== null && (
+                  <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${leaderboardTab === id ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"}`}>
+                    {count}
+                  </span>
+                )}
+                {id === "recommended" && (
+                  <span className="px-1.5 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-600">
+                    ✦
+                  </span>
+                )}
+              </button>
+            ))}
+            {/* Member avatars pushed to the right */}
+            {(blend.blend_members?.length ?? 0) > 0 && leaderboardTab === "blend" && (
+              <span className="ml-auto mb-1 flex items-center gap-1">
                 {blend.blend_members?.map((m) => (
                   <span
                     key={m.id}
@@ -549,42 +1062,78 @@ function BlendDetail({
                 ))}
               </span>
             )}
-          </p>
-          {(blend.blend_properties?.length ?? 0) === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl mb-3">🏠</div>
-              <p className="text-sm font-semibold text-gray-700">No properties yet</p>
-              <p className="text-xs text-gray-400 mt-1">Go to Discover and save properties here.</p>
-            </div>
-          ) : (
-            // Sort order uses server votes only — updates on refresh, not on every click
-            [...(blend.blend_properties ?? [])]
-              .sort((a, b) => {
-                const scoreOf = (bp: typeof a) => {
-                  const v = (blend.blend_property_votes ?? []).filter((v) => v.property_id === bp.property_id);
-                  return v.filter((x) => x.vote === "like").length - v.filter((x) => x.vote === "dislike").length;
-                };
-                return scoreOf(b) - scoreOf(a);
-              })
-              .map((bp, idx) => {
-                const sv = (blend.blend_property_votes ?? []).filter((v) => v.property_id === bp.property_id);
-                const serverScore = sv.filter((x) => x.vote === "like").length - sv.filter((x) => x.vote === "dislike").length;
-                return (
-                  <SavedPropertyCard
-                    key={bp.id}
-                    property={bp.properties}
-                    votes={optimisticVotes.filter((v) => v.property_id === bp.property_id)}
-                    serverScore={serverScore}
-                    userId={userId}
-                    rank={idx + 1}
-                    onRemove={() => handleRemove(bp.property_id)}
-                    onVote={(v) => handleVote(bp.property_id, v)}
-                    removing={removing === bp.property_id}
-                    voting={false}
-                  />
-                );
-              })
-          )}
+          </div>
+
+          {/* Tab content */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+
+            {/* ── In Blend tab ── */}
+            {leaderboardTab === "blend" && (
+              (blend.blend_properties?.length ?? 0) === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl mb-3">🏠</div>
+                  <p className="text-sm font-semibold text-gray-700">No properties yet</p>
+                  <p className="text-xs text-gray-400 mt-1">Go to Discover and save properties here.</p>
+                </div>
+              ) : (
+                [...(blend.blend_properties ?? [])]
+                  .sort((a, b) => {
+                    const scoreOf = (bp: typeof a) => {
+                      const v = (blend.blend_property_votes ?? []).filter((v) => v.property_id === bp.property_id);
+                      return v.filter((x) => x.vote === "like").length - v.filter((x) => x.vote === "dislike").length;
+                    };
+                    return scoreOf(b) - scoreOf(a);
+                  })
+                  .map((bp, idx) => {
+                    const sv = (blend.blend_property_votes ?? []).filter((v) => v.property_id === bp.property_id);
+                    const serverScore = sv.filter((x) => x.vote === "like").length - sv.filter((x) => x.vote === "dislike").length;
+                    return (
+                      <SavedPropertyCard
+                        key={bp.id}
+                        property={bp.properties}
+                        votes={optimisticVotes.filter((v) => v.property_id === bp.property_id)}
+                        serverScore={serverScore}
+                        userId={userId}
+                        rank={idx + 1}
+                        onRemove={() => handleRemove(bp.property_id)}
+                        onVote={(v) => handleVote(bp.property_id, v)}
+                        removing={removing === bp.property_id}
+                        voting={false}
+                      />
+                    );
+                  })
+              )
+            )}
+
+            {/* ── Recommended tab ── */}
+            {leaderboardTab === "recommended" && (
+              recsLoading ? (
+                <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                  <span className="w-8 h-8 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+                  <p className="text-xs text-gray-400">Finding similar properties…</p>
+                </div>
+              ) : recommended.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl mb-3">🔍</div>
+                  <p className="text-sm font-semibold text-gray-700">No recommendations yet</p>
+                  <p className="text-xs text-gray-400 mt-1">Add more properties to the blend to unlock suggestions.</p>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs text-gray-400">
+                    Based on properties already in this blend — same city, similar rent & bed count.
+                  </p>
+                  {recommended.map(({ property, reasons }) => (
+                    <RecommendedPropertyCard
+                      key={property.id}
+                      property={property}
+                      reasons={reasons}
+                    />
+                  ))}
+                </>
+              )
+            )}
+          </div>
         </div>
 
         {/* Divider */}
