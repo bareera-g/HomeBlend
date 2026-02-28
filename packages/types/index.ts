@@ -1,3 +1,6 @@
+import "dotenv/config";
+export * from "./database";
+
 // Session status
 export type SessionStatus = "LOBBY" | "SWIPING" | "RESULTS";
 

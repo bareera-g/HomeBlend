@@ -1,3 +1,4 @@
+export * from "./database";
 export type SessionStatus = "LOBBY" | "SWIPING" | "RESULTS";
 export type Vote = "YES" | "NO" | "MAYBE";
 export type RentOrBuy = "RENT" | "BUY";
