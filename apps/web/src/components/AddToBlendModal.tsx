@@ -50,7 +50,7 @@ export default function AddToBlendModal({ propertyId, onClose }: Props) {
     setFormError(null);
     setSaving("new");
 
-    const { id: blendId, error: createErr } = await createBlend(newName.trim(), user.id);
+    const { id: blendId, error: createErr } = await createBlend(newName.trim());
     if (createErr) { setFormError(createErr); setSaving(null); return; }
 
     const { error: addErr } = await addPropertyToBlend(blendId, propertyId, user.id);

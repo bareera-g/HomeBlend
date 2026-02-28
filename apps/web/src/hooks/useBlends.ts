@@ -41,16 +41,15 @@ export function useBlends() {
 
 export async function createBlend(
   name: string,
-  userId: string
 ): Promise<{ id: string; error: string | null }> {
+  // Uses a security-definer RPC so the insert bypasses RLS.
+  // RLS is still enforced on all SELECT / UPDATE / DELETE operations.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
-    .from("blends")
-    .insert({ name, created_by: userId })
-    .select("id")
-    .single();
+    .rpc("create_blend", { p_name: name });
 
-  return { id: data?.id ?? "", error: error?.message ?? null };
+  if (error) console.error("[createBlend]", error);
+  return { id: data ?? "", error: error?.message ?? null };
 }
 
 export async function addPropertyToBlend(
