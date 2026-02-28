@@ -1,0 +1,34 @@
+@import "mapbox-gl/dist/mapbox-gl.css";
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  font-family: 'DM Sans', sans-serif;
+  background: #F3EDE3;
+  color: #2C1A0E;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(166,124,61,0.25); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(166,124,61,0.45); }
+
+input, button, textarea, select { font-family: inherit; }
+button { -webkit-tap-highlight-color: transparent; }
+
+/* Mapbox overrides */
+.mapboxgl-ctrl-logo { display: none !important; }
+.mapboxgl-ctrl-attrib { display: none !important; }
+.mapboxgl-ctrl-group { background: rgba(251,247,241,0.92) !important; border: 1px solid rgba(166,124,61,0.22) !important; border-radius: 10px !important; box-shadow: 0 2px 12px rgba(80,50,10,0.1) !important; }
+.mapboxgl-ctrl-group button { color: #2C1A0E !important; }
+
+@keyframes fadeIn    { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes fadeInFast{ from { opacity: 0; } to { opacity: 1; } }
+@keyframes slideUp   { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes slideInR  { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes spin      { to { transform: rotate(360deg); } }
+@keyframes pulse     { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+@keyframes pop       { 0% { transform: scale(0.9); opacity: 0; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
+@keyframes shimmer   { 0% { background-position: -300px 0; } 100% { background-position: 300px 0; } }
