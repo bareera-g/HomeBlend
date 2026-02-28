@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
-import type { BlendWithDetails } from "@homeblend/types";
+import type { BlendWithDetails, VoteType } from "@homeblend/types";
 
 export function useBlends() {
   const [blends,  setBlends]  = useState<BlendWithDetails[]>([]);
@@ -17,11 +17,9 @@ export function useBlends() {
       .select(`
         *,
         blend_members(*),
-        blend_properties(
-          *,
-          properties(*, floorplans(*))
-        ),
-        blend_join_requests(*)
+        blend_properties(*, properties(*, floorplans(*))),
+        blend_join_requests(*),
+        blend_property_votes(*)
       `)
       .order("created_at", { ascending: false });
 
@@ -105,5 +103,22 @@ export async function respondToJoinRequest(
     .rpc("respond_join_request", { p_request_id: requestId, p_accept: accept });
 
   if (error) console.error("[respondToJoinRequest]", error);
+  return { error: error?.message ?? null };
+}
+
+/**
+ * Like or dislike a property within a blend.
+ * Clicking the same vote a second time removes the vote (toggle).
+ */
+export async function castBlendVote(
+  blendId: string,
+  propertyId: string,
+  vote: VoteType,
+): Promise<{ error: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
+    .rpc("cast_blend_vote", { p_blend_id: blendId, p_property_id: propertyId, p_vote: vote });
+
+  if (error) console.error("[castBlendVote]", error);
   return { error: error?.message ?? null };
 }

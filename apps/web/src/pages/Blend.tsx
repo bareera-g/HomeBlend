@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -7,8 +7,13 @@ import {
   removePropertyFromBlend,
   requestJoinBlend,
   respondToJoinRequest,
+  castBlendVote,
 } from "../hooks/useBlends";
-import type { BlendWithDetails, PropertyWithFloorplans } from "@homeblend/types";
+import type {
+  BlendWithDetails,
+  BlendPropertyVoteRow,
+  PropertyWithFloorplans,
+} from "@homeblend/types";
 import NavBar from "../components/NavBar";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -84,57 +89,215 @@ function BlendCard({
   );
 }
 
+// ─── Avatar helper ─────────────────────────────────────────────────────────
+
+function VoterAvatar({ label, title, color }: { label: string; title: string; color: "green" | "red" }) {
+  return (
+    <div
+      title={title}
+      className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+        color === "green" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-500"
+      }`}
+    >
+      {label}
+    </div>
+  );
+}
+
+// ─── Property card with voting ─────────────────────────────────────────────
+
 function SavedPropertyCard({
   property,
+  votes,
+  serverScore,
+  userId,
+  rank,
   onRemove,
+  onVote,
   removing,
+  voting,
 }: {
   property: PropertyWithFloorplans;
+  votes: BlendPropertyVoteRow[];        // optimistic — for button highlight + voter avatars
+  serverScore: number;                  // stable server score — for the rank badge
+  userId: string;
+  rank: number;
   onRemove: () => void;
+  onVote: (v: "like" | "dislike") => void;
   removing: boolean;
+  voting: boolean;
 }) {
-  const raw       = property.raw as Record<string, unknown>;
-  const imageUrl  = raw?.image_url as string | undefined;
-  const address   = raw?.address as string | undefined;
+  const raw        = property.raw as Record<string, unknown>;
+  const imageUrl   = raw?.image_url as string | undefined;
+  const address    = raw?.address as string | undefined;
   const lowestRent = property.floorplans.length > 0
     ? Math.min(...property.floorplans.map((f) => f.rent))
     : null;
 
+  const myVote    = votes.find((v) => v.user_id === userId)?.vote ?? null;
+  const likers    = votes.filter((v) => v.vote === "like");
+  const dislikers = votes.filter((v) => v.vote === "dislike");
+  const showScore = serverScore !== 0 || likers.length > 0 || dislikers.length > 0;
+
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden flex">
-      <div
-        className="w-24 shrink-0 bg-gray-100 bg-cover bg-center"
-        style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}
-      />
-      <div className="flex-1 p-3 min-w-0">
-        <p className="font-semibold text-gray-900 text-sm truncate">{property.name}</p>
-        {address && (
-          <p className="text-xs text-gray-400 truncate mt-0.5">{address}</p>
-        )}
-        {lowestRent !== null && (
-          <p className="text-sm font-bold text-blue-600 mt-1">
-            From ${lowestRent.toLocaleString()}/mo
-          </p>
-        )}
-        <p className="text-xs text-gray-400 mt-0.5">
-          {property.floorplans.length} floor plan{property.floorplans.length !== 1 ? "s" : ""}
-        </p>
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="flex">
+        {/* Rank badge */}
+        <div className="shrink-0 flex flex-col items-center justify-center w-9 gap-0.5 pl-2">
+          <span className="text-xs font-bold text-gray-300 leading-none">#{rank}</span>
+          {showScore && (
+            <span className={`text-xs font-bold leading-none ${serverScore > 0 ? "text-emerald-500" : serverScore < 0 ? "text-red-400" : "text-gray-300"}`}>
+              {serverScore > 0 ? `+${serverScore}` : serverScore}
+            </span>
+          )}
+        </div>
+
+        <div
+          className="w-16 shrink-0 bg-gray-100 bg-cover bg-center"
+          style={imageUrl ? { backgroundImage: `url(${imageUrl})` } : undefined}
+        />
+        <div className="flex-1 p-3 min-w-0">
+          <p className="font-semibold text-gray-900 text-sm truncate">{property.name}</p>
+          {address && <p className="text-xs text-gray-400 truncate mt-0.5">{address}</p>}
+          {lowestRent !== null && (
+            <p className="text-sm font-bold text-blue-600 mt-1">
+              From ${lowestRent.toLocaleString()}/mo
+            </p>
+          )}
+        </div>
+        <div className="shrink-0 flex flex-col items-end gap-1.5 p-2 pt-2.5">
+          {/* Remove */}
+          <button
+            type="button"
+            onClick={onRemove}
+            disabled={removing}
+            className="w-6 h-6 rounded-full bg-gray-50 hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-300 transition-colors disabled:opacity-50"
+            title="Remove from blend"
+          >
+            {removing ? (
+              <span className="w-2.5 h-2.5 border border-current border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            )}
+          </button>
+          {/* Vote buttons */}
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              disabled={voting}
+              onClick={() => onVote("like")}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all ${
+                myVote === "like"
+                  ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-300"
+                  : "bg-gray-50 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600"
+              }`}
+            >
+              <svg className="w-3 h-3" fill={myVote === "like" ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+              </svg>
+              {likers.length}
+            </button>
+            <button
+              type="button"
+              disabled={voting}
+              onClick={() => onVote("dislike")}
+              className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all ${
+                myVote === "dislike"
+                  ? "bg-red-100 text-red-600 ring-1 ring-red-300"
+                  : "bg-gray-50 text-gray-400 hover:bg-red-50 hover:text-red-500"
+              }`}
+            >
+              <svg className="w-3 h-3" fill={myVote === "dislike" ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+              </svg>
+              {dislikers.length}
+            </button>
+          </div>
+        </div>
       </div>
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={removing}
-        className="shrink-0 self-start m-2 w-7 h-7 rounded-full bg-gray-50 hover:bg-red-50 hover:text-red-500 flex items-center justify-center text-gray-400 transition-colors disabled:opacity-50"
-        title="Remove from blend"
-      >
-        {removing ? (
-          <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-        ) : (
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        )}
-      </button>
+      {/* Voter avatar strip */}
+      {votes.length > 0 && (
+        <div className="px-3 pb-2 flex items-center gap-1">
+          {likers.map((v) => (
+            <VoterAvatar key={v.id} label={(v.email?.[0] ?? "?").toUpperCase()} title={`${v.email ?? v.user_id} liked`} color="green" />
+          ))}
+          {likers.length > 0 && dislikers.length > 0 && (
+            <span className="text-gray-200 text-xs mx-0.5">·</span>
+          )}
+          {dislikers.map((v) => (
+            <VoterAvatar key={v.id} label={(v.email?.[0] ?? "?").toUpperCase()} title={`${v.email ?? v.user_id} passed`} color="red" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Insights panel ───────────────────────────────────────────────────────────
+
+function BlendInsights({
+  blend,
+  votes,
+}: {
+  blend: BlendWithDetails;
+  votes: BlendPropertyVoteRow[];
+}) {
+  const hasProperties = (blend.blend_properties?.length ?? 0) > 0;
+
+  // Per-member stats derived from votes
+  const memberMap = new Map<string, { email: string | null; likes: number; dislikes: number }>();
+  for (const v of votes) {
+    const m = memberMap.get(v.user_id) ?? { email: v.email, likes: 0, dislikes: 0 };
+    if (v.vote === "like") m.likes += 1;
+    else m.dislikes += 1;
+    memberMap.set(v.user_id, m);
+  }
+
+  if (!hasProperties) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center px-5">
+        <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl mb-3">📊</div>
+        <p className="text-sm font-semibold text-gray-700">No data yet</p>
+        <p className="text-xs text-gray-400 mt-1">Add properties and start voting to see insights.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-4 py-4 space-y-6">
+
+      {/* ── Member Activity ── */}
+      {memberMap.size > 0 && (
+        <div>
+          <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Member Activity</h3>
+          <div className="space-y-2">
+            {Array.from(memberMap.entries()).map(([uid, m]) => {
+              const total = m.likes + m.dislikes;
+              const likePct = total > 0 ? m.likes / total : 0;
+              return (
+                <div key={uid} className="bg-white rounded-xl border border-gray-100 p-3 flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                    {(m.email?.[0] ?? "?").toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{m.email ?? "Member"}</p>
+                    <p className="text-xs text-gray-400">{m.likes} liked · {m.dislikes} passed</p>
+                  </div>
+                  <div className="shrink-0 w-16">
+                    <div className="flex rounded-full overflow-hidden h-1.5 bg-gray-100">
+                      <div className="bg-emerald-400 h-full transition-all" style={{ width: `${likePct * 100}%` }} />
+                      <div className="bg-red-300 h-full transition-all" style={{ width: `${(1 - likePct) * 100}%` }} />
+                    </div>
+                    <p className="text-xs text-gray-400 text-right mt-0.5">{Math.round(likePct * 100)}%</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -214,18 +377,67 @@ function BlendDetail({
   onBack: () => void;
   onReload: () => void;
 }) {
-  const [shareOpen,    setShareOpen]    = useState(false);
-  const [removing,     setRemoving]     = useState<string | null>(null);
-  const [responding,   setResponding]   = useState<string | null>(null);
+  const [shareOpen,      setShareOpen]      = useState(false);
+  const [removing,       setRemoving]       = useState<string | null>(null);
+  const [responding,     setResponding]     = useState<string | null>(null);
+  const [optimisticVotes, setOptimisticVotes] = useState<BlendPropertyVoteRow[]>(
+    blend.blend_property_votes ?? []
+  );
 
-  const isOwner       = blend.created_by === userId;
+  const { user } = useAuth();
+  const userEmail = user?.email ?? null;
+
+  // Keep optimistic votes in sync after server reloads
+  useEffect(() => {
+    setOptimisticVotes(blend.blend_property_votes ?? []);
+  }, [blend.blend_property_votes]);
+
+  const isOwner         = blend.created_by === userId;
   const pendingRequests = blend.blend_join_requests?.filter((r) => r.status === "pending") ?? [];
 
-  async function handleRemove(propertyId: string, blendId: string) {
+  async function handleRemove(propertyId: string) {
     setRemoving(propertyId);
-    await removePropertyFromBlend(blendId, propertyId);
+    await removePropertyFromBlend(blend.id, propertyId);
     setRemoving(null);
     onReload();
+  }
+
+  function handleVote(propertyId: string, vote: "like" | "dislike") {
+    // Apply optimistic update immediately
+    setOptimisticVotes((prev) => {
+      const existing = prev.find(
+        (v) => v.property_id === propertyId && v.user_id === userId
+      );
+      if (existing?.vote === vote) {
+        // Same vote again → toggle off
+        return prev.filter((v) => !(v.property_id === propertyId && v.user_id === userId));
+      } else if (existing) {
+        // Switch vote
+        return prev.map((v) =>
+          v.property_id === propertyId && v.user_id === userId ? { ...v, vote } : v
+        );
+      } else {
+        // New vote
+        return [
+          ...prev,
+          {
+            id: `optimistic-${propertyId}-${Date.now()}`,
+            blend_id: blend.id,
+            property_id: propertyId,
+            user_id: userId,
+            email: userEmail,
+            vote,
+            created_at: new Date().toISOString(),
+          } satisfies BlendPropertyVoteRow,
+        ];
+      }
+    });
+
+    // Fire-and-forget API call; reload syncs server state in background
+    castBlendVote(blend.id, propertyId, vote).then(({ error }) => {
+      if (error) onReload(); // revert on failure by re-syncing from server
+      else onReload();
+    });
   }
 
   async function handleRespond(requestId: string, accept: boolean) {
@@ -237,7 +449,8 @@ function BlendDetail({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
+
+      {/* ── Header ── */}
       <div className="shrink-0 px-5 py-4 border-b border-gray-100 flex items-center gap-3">
         <button
           type="button"
@@ -258,7 +471,7 @@ function BlendDetail({
         <button
           type="button"
           onClick={() => setShareOpen(true)}
-          className="shrink-0 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center gap-2"
+          className="shrink-0 px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors flex items-center gap-1.5"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
@@ -267,7 +480,7 @@ function BlendDetail({
         </button>
       </div>
 
-      {/* Join Requests (owner only) */}
+      {/* ── Join Requests (owner only) ── */}
       {isOwner && pendingRequests.length > 0 && (
         <div className="shrink-0 px-5 py-3 border-b border-amber-100 bg-amber-50">
           <p className="text-xs font-semibold text-amber-700 mb-2 flex items-center gap-1.5">
@@ -283,9 +496,7 @@ function BlendDetail({
                   {(req.email?.[0] ?? "?").toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">
-                    {req.email ?? "Unknown user"}
-                  </p>
+                  <p className="text-sm font-medium text-gray-800 truncate">{req.email ?? "Unknown user"}</p>
                   <p className="text-xs text-gray-400">Wants to join</p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
@@ -296,13 +507,9 @@ function BlendDetail({
                     className="w-8 h-8 rounded-full bg-gray-100 hover:bg-red-100 hover:text-red-600 flex items-center justify-center text-gray-400 transition-colors disabled:opacity-50"
                     title="Decline"
                   >
-                    {responding === req.id ? (
-                      <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
-                    )}
+                    {responding === req.id
+                      ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                      : <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>}
                   </button>
                   <button
                     type="button"
@@ -311,13 +518,9 @@ function BlendDetail({
                     className="w-8 h-8 rounded-full bg-emerald-100 hover:bg-emerald-200 text-emerald-600 flex items-center justify-center transition-colors disabled:opacity-50"
                     title="Accept"
                   >
-                    {responding === req.id ? (
-                      <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
-                    ) : (
-                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                    )}
+                    {responding === req.id
+                      ? <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+                      : <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>}
                   </button>
                 </div>
               </div>
@@ -326,43 +529,72 @@ function BlendDetail({
         </div>
       )}
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-        {blend.blend_properties?.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl mb-4">🏠</div>
-            <p className="text-sm font-semibold text-gray-700">No properties yet</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Go to Discover and save properties to this blend.
-            </p>
-          </div>
-        ) : (
-          blend.blend_properties?.map((bp) => (
-            <SavedPropertyCard
-              key={bp.id}
-              property={bp.properties}
-              onRemove={() => handleRemove(bp.property_id, blend.id)}
-              removing={removing === bp.property_id}
-            />
-          ))
-        )}
-      </div>
+      {/* ── Two-column body: properties left, insights right ── */}
+      <div className="flex-1 flex overflow-hidden min-h-0">
 
-      {/* Members strip */}
-      {(blend.blend_members?.length ?? 0) > 0 && (
-        <div className="shrink-0 px-5 py-3 border-t border-gray-50 flex items-center gap-2">
-          <p className="text-xs text-gray-400 mr-1">Members</p>
-          {blend.blend_members?.map((m) => (
-            <div
-              key={m.id}
-              title={m.user_id}
-              className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 flex items-center justify-center text-white text-xs font-bold"
-            >
-              {m.role === "owner" ? "★" : "M"}
+        {/* Left — property list with voting */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 min-w-0">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+            Properties
+            {(blend.blend_members?.length ?? 0) > 0 && (
+              <span className="ml-2 inline-flex items-center gap-1 normal-case font-normal text-gray-400">
+                {blend.blend_members?.map((m) => (
+                  <span
+                    key={m.id}
+                    title={m.user_id}
+                    className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-400 to-indigo-600 inline-flex items-center justify-center text-white text-xs font-bold"
+                  >
+                    {m.role === "owner" ? "★" : "M"}
+                  </span>
+                ))}
+              </span>
+            )}
+          </p>
+          {(blend.blend_properties?.length ?? 0) === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <div className="w-14 h-14 rounded-2xl bg-gray-100 flex items-center justify-center text-3xl mb-3">🏠</div>
+              <p className="text-sm font-semibold text-gray-700">No properties yet</p>
+              <p className="text-xs text-gray-400 mt-1">Go to Discover and save properties here.</p>
             </div>
-          ))}
+          ) : (
+            // Sort order uses server votes only — updates on refresh, not on every click
+            [...(blend.blend_properties ?? [])]
+              .sort((a, b) => {
+                const scoreOf = (bp: typeof a) => {
+                  const v = (blend.blend_property_votes ?? []).filter((v) => v.property_id === bp.property_id);
+                  return v.filter((x) => x.vote === "like").length - v.filter((x) => x.vote === "dislike").length;
+                };
+                return scoreOf(b) - scoreOf(a);
+              })
+              .map((bp, idx) => {
+                const sv = (blend.blend_property_votes ?? []).filter((v) => v.property_id === bp.property_id);
+                const serverScore = sv.filter((x) => x.vote === "like").length - sv.filter((x) => x.vote === "dislike").length;
+                return (
+                  <SavedPropertyCard
+                    key={bp.id}
+                    property={bp.properties}
+                    votes={optimisticVotes.filter((v) => v.property_id === bp.property_id)}
+                    serverScore={serverScore}
+                    userId={userId}
+                    rank={idx + 1}
+                    onRemove={() => handleRemove(bp.property_id)}
+                    onVote={(v) => handleVote(bp.property_id, v)}
+                    removing={removing === bp.property_id}
+                    voting={false}
+                  />
+                );
+              })
+          )}
         </div>
-      )}
+
+        {/* Divider */}
+        <div className="shrink-0 w-px bg-gray-100" />
+
+        {/* Right — insights */}
+        <div className="w-72 shrink-0 overflow-y-auto">
+          <BlendInsights blend={blend} votes={optimisticVotes} />
+        </div>
+      </div>
 
       {shareOpen && <ShareModal blend={blend} onClose={() => setShareOpen(false)} />}
     </div>
@@ -433,7 +665,7 @@ export default function Blend() {
     return (
       <div className="h-screen flex flex-col bg-gray-50 overflow-hidden">
         <NavBar />
-        <div className="flex-1 overflow-hidden max-w-2xl mx-auto w-full">
+        <div className="flex-1 overflow-hidden max-w-5xl mx-auto w-full">
           <BlendDetail blend={activeBlend} userId={user!.id} onBack={handleBack} onReload={reload} />
         </div>
       </div>

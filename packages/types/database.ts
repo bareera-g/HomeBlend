@@ -63,6 +63,7 @@ export interface BlendPropertyRow {
   added_at: string;
 }
 
+export type VoteType          = "like" | "dislike";
 export type JoinRequestStatus = "pending" | "accepted" | "declined";
 
 export interface BlendJoinRequestRow {
@@ -71,6 +72,16 @@ export interface BlendJoinRequestRow {
   user_id: string;
   email: string | null;
   status: JoinRequestStatus;
+  created_at: string;
+}
+
+export interface BlendPropertyVoteRow {
+  id: string;
+  blend_id: string;
+  property_id: string;
+  user_id: string;
+  email: string | null;
+  vote: VoteType;
   created_at: string;
 }
 
@@ -175,6 +186,11 @@ export interface Database {
         Insert: { blend_id: string; user_id: string; email?: string | null; status?: JoinRequestStatus };
         Update: { status?: JoinRequestStatus };
       };
+      blend_property_votes: {
+        Row: BlendPropertyVoteRow;
+        Insert: { blend_id: string; property_id: string; user_id: string; email?: string | null; vote: VoteType };
+        Update: { vote?: VoteType };
+      };
     };
     Enums: {
       listing_source: ListingSource;
@@ -195,9 +211,10 @@ export interface BlendPropertyWithProperty extends BlendPropertyRow {
   properties: PropertyWithFloorplans;
 }
 
-/** A blend with members, saved properties, and join requests fully joined */
+/** A blend with members, saved properties, join requests, and votes fully joined */
 export interface BlendWithDetails extends BlendRow {
   blend_members: BlendMemberRow[];
   blend_properties: BlendPropertyWithProperty[];
   blend_join_requests: BlendJoinRequestRow[];
+  blend_property_votes: BlendPropertyVoteRow[];
 }
