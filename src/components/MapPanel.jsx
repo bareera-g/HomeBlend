@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import Map, { Marker, NavigationControl } from "react-map-gl";
+import Map, { Marker, NavigationControl } from "react-map-gl/mapbox";
 import { B, blendColor } from "../Brand.jsx";
 import { computeUniquePropertyImages } from "../lib/uniquePropertyImages.js";
 import "mapbox-gl/dist/mapbox-gl.css";
