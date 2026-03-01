@@ -1,7 +1,11 @@
-node_modules
-dist
+# Dependencies
+node_modules/
 
-# Environment variables — never commit these
+# Build output
+dist/
+dist-ssr/
+
+# Environment variables — NEVER commit these
 .env
 .env.local
 .env.*.local
@@ -9,3 +13,18 @@ dist
 # Keep example templates
 !.env.example
 
+# Editor / OS
+.DS_Store
+*.local
+.vscode/
+.idea/
+
+# Vite
+.vite/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Supabase temp
+supabase/.temp/
