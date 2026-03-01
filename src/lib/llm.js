@@ -1,40 +1,40 @@
 /**
- * HomeBlend — LLM utilities (Google Gemini)
- * Key is loaded from VITE_GEMINI_API_KEY in .env.local
+ * HomeBlend — LLM utilities (Google Gemini via server proxy)
+ * The API key is stored server-side as GEMINI_API_KEY in .env.local
+ * and never shipped to the browser.
  */
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
-const MODEL   = "gemini-1.5-flash";
+export const isLLMReady = true;
 
-export const isLLMReady = Boolean(API_KEY);
+// #region agent log
+console.warn('[DBG-276317] llm.js:init',JSON.stringify({proxy:true,isLLMReady:true}));
+fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'llm.js:init',message:'LLM module init (proxy mode)',data:{proxy:true},timestamp:Date.now()})}).catch(()=>{});
+// #endregion
 
 async function callGemini(prompt, maxTokens = 512) {
-  if (!API_KEY) return null;
-  try {
-    // Use same-origin proxy to avoid CORS (key is applied on the server)
-    const res = await fetch(`/api/gemini?model=${encodeURIComponent(MODEL)}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: maxTokens,
-          temperature: 0.4,
-        },
-      }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      console.error("[HomeBlend LLM] Error:", res.status, err);
-      return null;
-    }
-    const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
-    return text;
-  } catch (e) {
-    console.error("[HomeBlend LLM] Fetch error:", e);
-    return null;
+  const res = await fetch("/api/gemini", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt, maxTokens }),
+  });
+
+  let data;
+  try { data = await res.json(); } catch { throw new Error("Invalid response from insights server"); }
+
+  if (!res.ok) {
+    // #region agent log
+    console.warn('[DBG-276317] llm.js:callGemini-error',JSON.stringify({status:res.status,error:data?.error}));
+    fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'llm.js:callGemini-error',message:'Proxy returned error',data:{status:res.status,error:data?.error},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw new Error(data?.error || `Server error (${res.status})`);
   }
+
+  // #region agent log
+  console.warn('[DBG-276317] llm.js:callGemini-success',JSON.stringify({hasText:Boolean(data?.text),textLength:data?.text?.length}));
+  fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'llm.js:callGemini-success',message:'Proxy returned text',data:{hasText:Boolean(data?.text),textLength:data?.text?.length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  return data.text;
 }
 
 function extractJSON(text, fallback) {
@@ -55,9 +55,8 @@ function extractJSON(text, fallback) {
  * }
  */
 export async function generateBlendAnalysis({ members, votes, properties, rankedProperties }) {
-  if (!API_KEY || members.length === 0) return null;
+  if (members.length === 0) return null;
 
-  // Build a compact data summary for the prompt
   const memberSummaries = members.map(m => {
     const uid = m.auth_user_id;
     const liked = properties.filter(p =>
@@ -120,9 +119,8 @@ Respond ONLY with valid JSON (no markdown, no explanation) in this exact structu
  * }
  */
 export async function generatePicksAnalysis({ members, votes, properties, scoredProperties }) {
-  if (!API_KEY || members.length === 0 || properties.length === 0) return null;
+  if (members.length === 0 || properties.length === 0) return null;
 
-  // Build compact member taste summaries
   const memberSummaries = members.map(m => {
     const uid = m.auth_user_id;
     const liked    = properties.filter(p => votes.some(v => v.user_id === uid && v.property_id === p.id && v.vote === 1));
@@ -135,7 +133,6 @@ export async function generatePicksAnalysis({ members, votes, properties, scored
     };
   });
 
-  // Only analyse the top-N properties to keep prompt short
   const topProps = (scoredProperties || []).slice(0, 6).map(({ property }) => ({
     id: property.id,
     title: property.title,

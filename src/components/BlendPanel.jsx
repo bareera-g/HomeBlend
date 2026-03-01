@@ -40,10 +40,22 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
     setLlmLoading(true);
     setLlmError(null);
     try {
+      // #region agent log
+      console.warn('[DBG-276317] BlendPanel:runLLM-start',JSON.stringify({isLLMReady,memberCount:members.length,voteCount:votes.length,propertyCount:properties.length}));
+      fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'BlendPanel.jsx:runLLM-start',message:'runLLM called',data:{isLLMReady,memberCount:members.length,voteCount:votes.length,propertyCount:properties.length},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       const result = await generateBlendAnalysis({ members, votes, properties, rankedProperties });
+      // #region agent log
+      console.warn('[DBG-276317] BlendPanel:runLLM-result',JSON.stringify({resultIsNull:result===null,resultType:typeof result,resultKeys:result?Object.keys(result):null}));
+      fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'BlendPanel.jsx:runLLM-result',message:'generateBlendAnalysis returned',data:{resultIsNull:result===null,resultType:typeof result,resultKeys:result?Object.keys(result):null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (result) setLlmData(result);
-      else setLlmError("Could not generate insights — check your Anthropic API key in .env.local");
+      else setLlmError("Could not generate insights — Gemini returned an empty response");
     } catch (e) {
+      // #region agent log
+      console.warn('[DBG-276317] BlendPanel:runLLM-catch',JSON.stringify({error:e.message}));
+      fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'BlendPanel.jsx:runLLM-catch',message:'generateBlendAnalysis threw',data:{error:e.message},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setLlmError(e.message);
     } finally {
       setLlmLoading(false);
@@ -108,7 +120,7 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
         )}
         {!isLLMReady && (
           <div style={{ marginTop: 8, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted }}>
-            Add <code style={{ fontFamily: "monospace", fontSize: 9 }}>VITE_GEMINI_API_KEY</code> to .env.local for AI insights.
+            Add <code style={{ fontFamily: "monospace", fontSize: 9 }}>GEMINI_API_KEY</code> to .env.local for AI insights.
           </div>
         )}
         {llmError && <div style={{ marginTop: 6, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#C0624A" }}>{llmError}</div>}

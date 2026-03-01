@@ -1,21 +1,58 @@
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-dist-ssr/
-
-# Environment variables — NEVER commit these
+# ======================
+# Environment variables
+# ======================
 .env
 .env.*
 !.env.example
 
-# Editor / OS
-.DS_Store
-*.local
-.vscode/
-.idea/
-
-# Logs
-*.log
+# ======================
+# Node / npm
+# ======================
+node_modules/
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ======================
+# Build outputs
+# ======================
+dist/
+build/
+out/
+
+# ======================
+# Vite
+# ======================
+.vite/
+
+# ======================
+# OS / Editor junk
+# ======================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ======================
+# Logs
+# ======================
+logs/
+*.log
+
+# ======================
+# Supabase
+# ======================
+.supabase/
+
+# ======================
+# Coverage / testing
+# ======================
+coverage/
+
+# ======================
+# Misc
+# ======================
+*.local

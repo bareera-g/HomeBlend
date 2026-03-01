@@ -87,7 +87,7 @@ export default function GroupPicksPanel({ members = [], votes = [], properties =
     try {
       const result = await generatePicksAnalysis({ members, votes, properties, scoredProperties });
       if (result) setLlmPicks(result);
-      else setLlmError("Could not generate picks — check VITE_GEMINI_API_KEY in .env.local");
+      else setLlmError("Could not generate picks — Gemini returned an empty response");
     } catch (e) {
       setLlmError(e.message);
     } finally {
