@@ -398,23 +398,6 @@ export default function Dashboard() {
 
         <div style={{ flex: 1 }} />
 
-        {/* Rooms toggle button */}
-        <button onClick={() => setShowRooms(v => !v)} style={{
-          display: "flex", alignItems: "center", gap: 6,
-          padding: "6px 14px", borderRadius: 8,
-          border: `1px solid ${showRooms ? B.gold : B.border}`,
-          background: showRooms ? "rgba(166,124,61,0.08)" : "rgba(255,255,255,0.5)",
-          fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: showRooms ? 600 : 500,
-          color: showRooms ? B.gold : B.muted,
-          cursor: "pointer", transition: "all 0.15s",
-        }}>
-          <Icon d={IC.home} size={13} color={showRooms ? B.gold : B.muted} sw={1.8} />
-          Rooms
-          {rooms.length > 0 && (
-            <span style={{ padding: "1px 6px", borderRadius: 10, background: showRooms ? B.gold : "rgba(166,124,61,0.1)", fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: showRooms ? "#fff" : B.gold }}>{rooms.length}</span>
-          )}
-        </button>
-
         <div style={{ width: 1, height: 18, background: B.border }} />
 
         {/* User avatar + sign out */}
@@ -597,48 +580,60 @@ export default function Dashboard() {
             selectedProperty={selected}
             onSelect={handleMapPropertySelect}
           />
-
-          {/* Rooms toggle FAB (when panel is closed) */}
-          {!showRooms && (
-            <button
-              onClick={() => setShowRooms(true)}
-              style={{
-                position: "absolute", bottom: 24, right: 24,
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "10px 18px", borderRadius: 12,
-                background: "rgba(251,247,241,0.96)", backdropFilter: "blur(16px)",
-                border: `1px solid ${B.border}`,
-                boxShadow: "0 4px 24px rgba(40,24,8,0.15)",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, color: B.ink,
-                cursor: "pointer", transition: "all 0.18s",
-                animation: "slideUp 0.25s ease",
-              }}
-            >
-              <Icon d={IC.home} size={14} color={B.gold} sw={1.8} />
-              My Rooms
-              {rooms.length > 0 && (
-                <span style={{ padding: "1px 6px", borderRadius: 10, background: B.gold, fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff" }}>{rooms.length}</span>
-              )}
-            </button>
-          )}
         </div>
 
-        {/* ── Rooms slide-out panel (from right, overlays map) ──────────────── */}
-        {showRooms && (
-          <>
-            {/* Backdrop click-away */}
-            <div
-              onClick={() => { if (!dragging) setShowRooms(false); }}
-              style={{ position: "absolute", inset: 0, zIndex: 40 }}
-            />
-            <div style={{
-              position: "absolute", top: 0, right: 0, bottom: 0, width: 360,
-              background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
-              borderLeft: `1px solid ${B.border}`,
-              boxShadow: "-16px 0 60px rgba(40,24,8,0.15)",
-              animation: "slideInR 0.28s cubic-bezier(.16,1,.3,1)",
-              display: "flex", flexDirection: "column", zIndex: 45, overflow: "hidden",
-            }}>
+        {/* ── Rooms panel + Donkey Brown pull tab (right side, single sliding unit) ───── */}
+        <div
+          style={{
+            position: "absolute", top: 0, right: 0, bottom: 0,
+            width: 420,
+            display: "flex", flexDirection: "row",
+            transform: showRooms ? "translateX(0)" : "translateX(376px)",
+            transition: "transform 0.32s cubic-bezier(.16,1,.3,1)",
+            zIndex: 45, pointerEvents: "auto",
+          }}
+        >
+          {/* Pull tab — Donkey Brown, large, attached to panel */}
+          <button
+            onClick={() => setShowRooms(v => !v)}
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
+              width: 44, flexShrink: 0,
+              borderRadius: "14px 0 0 14px",
+              background: "linear-gradient(180deg, #6B5344 0%, #5C4033 50%, #523829 100%)",
+              border: "1px solid rgba(92,64,51,0.5)", borderRight: "none",
+              boxShadow: "-6px 0 24px rgba(44,26,14,0.25), inset 0 1px 0 rgba(255,255,255,0.08)",
+              cursor: "pointer", padding: "12px 0",
+              alignSelf: "center",
+            }}
+            title={showRooms ? "Close rooms" : "Open My Rooms"}
+          >
+            <Icon d={IC.home} size={18} color="#F5EDE4" sw={1.8} />
+            <span style={{
+              writingMode: "vertical-rl",
+              transform: "rotate(180deg)",
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: 11, fontWeight: 700,
+              letterSpacing: 2.2, textTransform: "uppercase",
+              color: "#F5EDE4", userSelect: "none",
+            }}>My Rooms</span>
+            {rooms.length > 0 && (
+              <span style={{
+                width: 20, height: 20, borderRadius: "50%",
+                background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 800, color: "#F5EDE4", flexShrink: 0,
+              }}>{rooms.length}</span>
+            )}
+          </button>
+
+          {/* Panel content */}
+          <div style={{
+            width: 376, flexShrink: 0,
+            background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
+            borderLeft: `1px solid ${B.border}`,
+            boxShadow: "-16px 0 60px rgba(40,24,8,0.15)",
+            display: "flex", flexDirection: "column", overflow: "hidden",
+          }}>
               {/* Rooms header */}
               <div style={{ padding: "18px 18px 14px", borderBottom: `1px solid ${B.border}`, flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
@@ -737,9 +732,8 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
-          </>
-        )}
-      </div>
+          </div>
+        </div>
 
       {/* ── Create Room Modal ─────────────────────────────────────────────── */}
       {showCreateModal && (
