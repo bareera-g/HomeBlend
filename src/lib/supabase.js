@@ -94,22 +94,19 @@ export async function fetchProfile(userId) {
 
 export async function ensureProfile(userId, displayName) {
   guard();
+  const fallback = { id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() };
   return safeQuery(async () => {
-    // Try insert first (handles new users); upsert if already exists
     const { data, error } = await supabase.from("profiles")
-      .upsert({
-        id: userId,
-        display_name: displayName || "User",
-        avatar_color: randomAvatarColor(),
-      }, { onConflict: "id", ignoreDuplicates: false })
+      .upsert({ id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() }, { onConflict: "id" })
       .select().maybeSingle();
-    if (error && !isSchemaMissing(error)) {
-      // Profile already exists — fetch it
+    if (error) {
+      if (isSchemaMissing(error)) return fallback;
+      // Already exists — fetch it
       const { data: existing } = await supabase.from("profiles").select("*").eq("id", userId).maybeSingle();
-      return existing;
+      return existing || fallback;
     }
-    return data;
-  }, { id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() }, "ensureProfile");
+    return data || fallback;
+  }, fallback, "ensureProfile");
 }
 
 export async function updateProfile(userId, updates) {
@@ -211,12 +208,15 @@ export async function fetchUserRooms(userId) {
 export async function joinRoom(blendId, userId, displayName, avatarColor) {
   guard();
   return safeQuery(async () => {
-    // Upsert profile so display name is available
-    await supabase.from("profiles").upsert(
-      { id: userId, display_name: displayName || "Member", avatar_color: avatarColor || randomAvatarColor() },
-      { onConflict: "id", ignoreDuplicates: false }
-    );
-    // Upsert member row
+    // Best-effort profile upsert — silently ignored if profiles table is missing
+    try {
+      await supabase.from("profiles").upsert(
+        { id: userId, display_name: displayName || "Member", avatar_color: avatarColor || randomAvatarColor() },
+        { onConflict: "id" }
+      );
+    } catch { /* profiles table not created yet */ }
+
+    // This always runs — blend_members exists
     const { error } = await supabase.from("blend_members")
       .upsert({ blend_id: blendId, user_id: userId, role: "member" }, { onConflict: "blend_id,user_id" });
     if (error) throw error;
@@ -231,19 +231,31 @@ export async function leaveRoom(blendId, userId) {
   );
 }
 
-/** Fetch members, joining with profiles for display name + avatar. */
+/** Fetch members — two separate queries so we survive if profiles table is missing. */
 export async function fetchMembers(blendId) {
   guard();
   return safeQuery(async () => {
-    const { data } = await supabase.from("blend_members")
-      .select("*, profiles(display_name, avatar_color)")
+    const { data: members, error } = await supabase.from("blend_members")
+      .select("id, blend_id, user_id, role, joined_at")
       .eq("blend_id", blendId)
       .order("joined_at");
-    return (data || []).map(m => ({
+    if (error) throw error;
+    if (!members?.length) return [];
+
+    // Best-effort profile lookup — silently falls back if table is missing
+    let profileMap = {};
+    try {
+      const userIds = members.map(m => m.user_id);
+      const { data: profs } = await supabase.from("profiles")
+        .select("id, display_name, avatar_color").in("id", userIds);
+      (profs || []).forEach(p => { profileMap[p.id] = p; });
+    } catch { /* profiles table not created yet — use defaults */ }
+
+    return members.map(m => ({
       ...m,
-      auth_user_id:  m.user_id,
-      display_name:  m.profiles?.display_name || "Member",
-      avatar_color:  m.profiles?.avatar_color || randomAvatarColor(),
+      auth_user_id: m.user_id,
+      display_name: profileMap[m.user_id]?.display_name || "Member",
+      avatar_color: profileMap[m.user_id]?.avatar_color || "#A67C3D",
     }));
   }, [], "fetchMembers");
 }
