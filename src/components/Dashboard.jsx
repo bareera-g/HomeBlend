@@ -30,7 +30,6 @@ export default function Dashboard() {
   const [selected,      setSelected]     = useState(null);
   const [filter,        setFilter]       = useState("all");
   const [category,      setCategory]     = useState("All");
-  const [minPrice,      setMinPrice]     = useState(1000);
   const [maxPrice,      setMaxPrice]     = useState(5000);
   const [minBeds,       setMinBeds]      = useState(0);
   const [minBaths,      setMinBaths]     = useState(0);
@@ -81,7 +80,7 @@ export default function Dashboard() {
     let list = PROPERTIES.filter(p => {
       if (filter === "saved" && !savedIds.includes(p.id)) return false;
       if (category !== "All" && p.category !== category) return false;
-      if (p.priceNum < minPrice || p.priceNum > maxPrice) return false;
+      if (p.priceNum > maxPrice) return false;
       if (minBeds  > 0 && p.beds  < minBeds)  return false;
       if (minBaths > 0 && p.baths < minBaths) return false;
       if (petOnly    && !p.petFriendly) return false;
@@ -94,10 +93,10 @@ export default function Dashboard() {
     else if (sortBy === "newest")     list = [...list].sort((a, b) => b.yearBuilt - a.yearBuilt);
     else if (sortBy === "largest")    list = [...list].sort((a, b) => b.sqft - a.sqft);
     return list;
-  }, [filter, category, minPrice, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
+  }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
 
   const activeFilters = [
-    minPrice > 1000, maxPrice < 5000, minBeds > 0, minBaths > 0,
+    maxPrice < 5000, minBeds > 0, minBaths > 0,
     petOnly, parkingReq, laundryReq, sortBy !== "default",
   ].filter(Boolean).length;
 
@@ -145,7 +144,7 @@ export default function Dashboard() {
   }
 
   function resetFilters() {
-    setMinPrice(1000); setMaxPrice(5000);
+    setMaxPrice(5000);
     setMinBeds(0); setMinBaths(0);
     setPetOnly(false); setParkingReq(false); setLaundryReq(false);
     setSortBy("default");
@@ -317,24 +316,15 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Filters toggle */}
-        <button onClick={() => setShowFilters(v => !v)} style={{
-          display: "flex", alignItems: "center", gap: 6,
-          padding: "6px 12px", borderRadius: 8,
-          border: `1px solid ${activeFilters > 0 ? B.gold : B.border}`,
-          background: activeFilters > 0 ? "rgba(166,124,61,0.08)" : "rgba(255,255,255,0.5)",
-          fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500,
-          color: activeFilters > 0 ? B.gold : B.muted,
-          cursor: "pointer", transition: "all 0.15s",
-        }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/>
-          </svg>
-          Filters
-          {activeFilters > 0 && (
-            <span style={{ width: 17, height: 17, borderRadius: "50%", background: B.gold, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff" }}>{activeFilters}</span>
-          )}
-        </button>
+        {/* Price slider — in header, matching screenshot */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
+            Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
+          </span>
+          <input type="range" min={1000} max={5000} step={100} value={maxPrice}
+            onChange={e => setMaxPrice(+e.target.value)}
+            style={{ accentColor: B.gold, width: 90, cursor: "pointer" }} />
+        </div>
 
         <div style={{ flex: 1 }} />
 
@@ -380,158 +370,94 @@ export default function Dashboard() {
         </div>
       </header>
 
-      {/* ── Filter Panel (collapsible below header) ──────────────────────────── */}
-      {showFilters && (
-        <div style={{
-          padding: "14px 18px 16px",
-          background: "rgba(251,247,241,0.98)",
-          borderBottom: `1px solid ${B.border}`,
-          flexShrink: 0, zIndex: 55,
-          animation: "fadeIn 0.18s ease",
-        }}>
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-
-            {/* Category chips */}
-            <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 7 }}>Type</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {CATEGORIES.map(cat => (
-                  <button key={cat} onClick={() => setCategory(cat)} style={{
-                    padding: "4px 11px", borderRadius: 12, border: "none",
-                    background: category === cat ? B.gold : "rgba(166,124,61,0.08)",
-                    color: category === cat ? "#FAF6EE" : B.muted,
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 500,
-                    cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-                  }}>{cat}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Price range */}
-            <div style={{ minWidth: 200 }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 7 }}>
-                Price: <span style={{ color: B.gold, fontWeight: 600 }}>${minPrice.toLocaleString()} – ${maxPrice.toLocaleString()}</span>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.muted, width: 28 }}>Min</span>
-                  <input type="range" min={1000} max={5000} step={100} value={minPrice}
-                    onChange={e => setMinPrice(Math.min(+e.target.value, maxPrice - 100))}
-                    style={{ accentColor: B.gold, flex: 1, cursor: "pointer" }} />
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.muted, width: 28 }}>Max</span>
-                  <input type="range" min={1000} max={5000} step={100} value={maxPrice}
-                    onChange={e => setMaxPrice(Math.max(+e.target.value, minPrice + 100))}
-                    style={{ accentColor: B.gold, flex: 1, cursor: "pointer" }} />
-                </div>
-              </div>
-            </div>
-
-            {/* Beds */}
-            <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 7 }}>Bedrooms</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                {[[0,"Any"],[1,"1+"],[2,"2+"],[3,"3+"]].map(([v, l]) => (
-                  <button key={v} onClick={() => setMinBeds(v)} style={{
-                    padding: "4px 10px", borderRadius: 8, border: `1px solid ${minBeds === v ? B.gold : B.border}`,
-                    background: minBeds === v ? "rgba(166,124,61,0.1)" : "transparent",
-                    color: minBeds === v ? B.gold : B.muted,
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: minBeds === v ? 700 : 400,
-                    cursor: "pointer", transition: "all 0.15s",
-                  }}>{l}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Baths */}
-            <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 7 }}>Bathrooms</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                {[[0,"Any"],[1,"1+"],[2,"2+"],[2.5,"2.5+"]].map(([v, l]) => (
-                  <button key={v} onClick={() => setMinBaths(v)} style={{
-                    padding: "4px 10px", borderRadius: 8, border: `1px solid ${minBaths === v ? B.gold : B.border}`,
-                    background: minBaths === v ? "rgba(166,124,61,0.1)" : "transparent",
-                    color: minBaths === v ? B.gold : B.muted,
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: minBaths === v ? 700 : 400,
-                    cursor: "pointer", transition: "all 0.15s",
-                  }}>{l}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Amenities */}
-            <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 7 }}>Amenities</div>
-              <div style={{ display: "flex", gap: 5 }}>
-                {[
-                  [petOnly,    setPetOnly,    "Pets OK"],
-                  [parkingReq, setParkingReq, "Parking"],
-                  [laundryReq, setLaundryReq, "In-unit W/D"],
-                ].map(([active, setter, label]) => (
-                  <button key={label} onClick={() => setter(v => !v)} style={{
-                    padding: "4px 11px", borderRadius: 8,
-                    border: `1px solid ${active ? B.gold : B.border}`,
-                    background: active ? "rgba(166,124,61,0.1)" : "transparent",
-                    color: active ? B.gold : B.muted,
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: active ? 600 : 400,
-                    cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-                  }}>{label}</button>
-                ))}
-              </div>
-            </div>
-
-            {/* Sort */}
-            <div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 7 }}>Sort</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {[["default","Best match"],["price-asc","Price ↑"],["price-desc","Price ↓"],["newest","Newest"],["largest","Largest"]].map(([v, l]) => (
-                  <button key={v} onClick={() => setSortBy(v)} style={{
-                    padding: "4px 10px", borderRadius: 8, border: `1px solid ${sortBy === v ? B.gold : B.border}`,
-                    background: sortBy === v ? "rgba(166,124,61,0.1)" : "transparent",
-                    color: sortBy === v ? B.gold : B.muted,
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: sortBy === v ? 700 : 400,
-                    cursor: "pointer", transition: "all 0.15s", whiteSpace: "nowrap",
-                  }}>{l}</button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Footer: count + reset */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12 }}>
-            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>
-              <strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"} match
-              {activeFilters > 0 && <span style={{ marginLeft: 5, color: B.gold }}>· {activeFilters} filter{activeFilters !== 1 ? "s" : ""} active</span>}
-            </span>
-            {activeFilters > 0 && (
-              <button onClick={resetFilters} style={{
-                padding: "3px 10px", borderRadius: 7, border: `1px solid ${B.border}`,
-                background: "transparent", fontFamily: "'DM Sans', sans-serif", fontSize: 10,
-                color: B.muted, cursor: "pointer",
-              }}>Reset all</button>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ── Body ─────────────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
 
         {/* ── Properties panel ──────────────────────────────────────────────── */}
-        <div style={{ width: 390, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
+        <div style={{ width: 262, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
-          {/* Sub-header */}
-          <div style={{ padding: "10px 14px 9px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.88)" }}>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, display: "flex", alignItems: "center", gap: 6 }}>
-              <span><strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"}</span>
-              {dragging && (
-                <span style={{ color: B.gold, fontWeight: 600, animation: "pulse 1.5s ease infinite" }}>
-                  · drop onto a room →
-                </span>
-              )}
+          {/* Sub-header: category chips + count */}
+          <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
+            {/* Category chips */}
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+              {CATEGORIES.map(cat => (
+                <button key={cat} onClick={() => setCategory(cat)} style={{
+                  padding: "3px 9px", borderRadius: 12, border: "none",
+                  background: category === cat ? B.gold : "rgba(166,124,61,0.08)",
+                  color: category === cat ? "#FAF6EE" : B.muted,
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 500,
+                  cursor: "pointer", transition: "all 0.15s",
+                }}>{cat}</button>
+              ))}
+            </div>
+            {/* Count + filter toggle */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>
+                <strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"}
+                {dragging && <span style={{ marginLeft: 6, color: B.gold, fontWeight: 600, animation: "pulse 1.5s ease infinite" }}>· drop → room</span>}
+              </div>
+              <button onClick={() => setShowFilters(v => !v)} title="More filters" style={{
+                display: "flex", alignItems: "center", gap: 4,
+                padding: "3px 8px", borderRadius: 7,
+                border: `1px solid ${activeFilters > 0 ? B.gold : B.border}`,
+                background: activeFilters > 0 ? "rgba(166,124,61,0.08)" : "transparent",
+                color: activeFilters > 0 ? B.gold : B.muted,
+                fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 500,
+                cursor: "pointer",
+              }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/>
+                </svg>
+                {activeFilters > 0 ? `Filters · ${activeFilters}` : "Filters"}
+              </button>
             </div>
           </div>
+
+          {/* Compact filter dropdown (inside properties panel) */}
+          {showFilters && (
+            <div style={{ padding: "12px 11px 10px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0, animation: "fadeIn 0.18s ease" }}>
+              {/* Beds */}
+              <div style={{ marginBottom: 9 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bedrooms</div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[[0,"Any"],[1,"1+"],[2,"2+"],[3,"3+"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setMinBeds(v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${minBeds === v ? B.gold : B.border}`, background: minBeds === v ? "rgba(166,124,61,0.1)" : "transparent", color: minBeds === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: minBeds === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Baths */}
+              <div style={{ marginBottom: 9 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bathrooms</div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[[0,"Any"],[1,"1+"],[2,"2+"],[2.5,"2.5+"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setMinBaths(v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${minBaths === v ? B.gold : B.border}`, background: minBaths === v ? "rgba(166,124,61,0.1)" : "transparent", color: minBaths === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: minBaths === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Amenities */}
+              <div style={{ marginBottom: 9 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Amenities</div>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {[[petOnly, setPetOnly, "Pets OK"],[parkingReq, setParkingReq, "Parking"],[laundryReq, setLaundryReq, "In-unit W/D"]].map(([active, setter, label]) => (
+                    <button key={label} onClick={() => setter(v => !v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${active ? B.gold : B.border}`, background: active ? "rgba(166,124,61,0.1)" : "transparent", color: active ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: active ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap" }}>{label}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Sort */}
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Sort by</div>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {[["default","Best"],["price-asc","$ ↑"],["price-desc","$ ↓"],["newest","New"],["largest","Big"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setSortBy(v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${sortBy === v ? B.gold : B.border}`, background: sortBy === v ? "rgba(166,124,61,0.1)" : "transparent", color: sortBy === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: sortBy === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {activeFilters > 0 && (
+                <button onClick={resetFilters} style={{ padding: "3px 10px", borderRadius: 7, border: `1px solid ${B.border}`, background: "transparent", fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, cursor: "pointer" }}>Reset all</button>
+              )}
+            </div>
+          )}
 
           {/* Scrollable cards */}
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 11px 24px", display: "flex", flexDirection: "column", gap: 12 }}>
