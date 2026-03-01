@@ -250,12 +250,62 @@ export function unsubscribeFromRoom(channel) {
   if (channel && supabase) supabase.removeChannel(channel);
 }
 
-// ── Blend (AI edge function) ───────────────────────────────────────────────────
-export async function callBlend(roomId) {
-  guard("callBlend");
-  const { data, error } = await supabase.functions.invoke("blend-profiles", {
-    body: { roomId },
-  });
+// ── Join Requests ─────────────────────────────────────────────────────────────
+
+/** Fetch all join requests for a room (owner only — RLS enforces this). */
+export async function fetchJoinRequests(roomId) {
+  guard("fetchJoinRequests");
+  const { data, error } = await supabase
+    .from("room_join_requests")
+    .select("*")
+    .eq("room_id", roomId)
+    .order("created_at", { ascending: false });
   if (error) throw error;
+  return data || [];
+}
+
+/** Send a join request for the current user (uses RPC so SECURITY DEFINER runs insert). */
+export async function requestToJoin(roomId, userId, displayName) {
+  guard("requestToJoin");
+  // Try the RPC first; fallback to direct insert if RPC not deployed yet
+  const { data, error } = await supabase.rpc("request_to_join", {
+    p_room_id:      roomId,
+    p_display_name: displayName || "User",
+  });
+  if (error) {
+    // Fallback: direct insert (works if RLS allows it)
+    const { error: e2 } = await supabase.from("room_join_requests").upsert(
+      { room_id: roomId, user_id: userId, display_name: displayName || "User", status: "pending" },
+      { onConflict: "room_id,user_id" }
+    );
+    if (e2) throw e2;
+    return "pending";
+  }
+  return data;
+}
+
+/** Room owner approves or declines a pending request. */
+export async function respondToJoinRequest(requestId, accept, roomId) {
+  guard("respondToJoinRequest");
+  // Try the RPC first
+  const { data, error } = await supabase.rpc("respond_join_request", {
+    p_request_id: requestId,
+    p_accept:     accept,
+  });
+  if (error) {
+    // Fallback: manual update
+    const status = accept ? "approved" : "declined";
+    await supabase.from("room_join_requests").update({ status }).eq("id", requestId);
+    if (accept) {
+      const { data: req } = await supabase.from("room_join_requests").select("*").eq("id", requestId).single();
+      if (req) {
+        await supabase.from("room_members").upsert(
+          { room_id: req.room_id, auth_user_id: req.user_id, display_name: req.display_name, role: "member", avatar_color: randomAvatarColor() },
+          { onConflict: "room_id,auth_user_id" }
+        );
+      }
+    }
+    return status;
+  }
   return data;
 }
