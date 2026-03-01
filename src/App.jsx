@@ -3,16 +3,11 @@ import { useAuth } from "./lib/auth.jsx";
 import AuthPage  from "./components/AuthPage.jsx";
 import Dashboard from "./components/Dashboard.jsx";
 import RoomView  from "./components/RoomView.jsx";
-import { B } from "./Brand.jsx";
-import LoadingBar from "./components/LoadingBar.jsx";
+import LoadingScreen from "./components/LoadingScreen.jsx";
 
 function ProtectedRoute({ element }) {
   const { user, loading } = useAuth();
-  if (loading) return (
-    <div style={{ height: "100dvh", background: B.bg }}>
-      <LoadingBar loading={true} />
-    </div>
-  );
+  if (loading) return <LoadingScreen loading={true} />;
   if (!user) return <Navigate to="/auth" replace />;
   return element;
 }

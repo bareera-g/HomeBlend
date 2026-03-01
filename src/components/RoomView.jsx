@@ -19,7 +19,7 @@ import BlendPanel         from "./BlendPanel.jsx";
 import GroupPicksPanel    from "./GroupPicksPanel.jsx";
 import RoomPropertyCard   from "./RoomPropertyCard.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
-import LoadingBar from "./LoadingBar.jsx";
+import LoadingScreen from "./LoadingScreen.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function RoomView() {
@@ -46,6 +46,7 @@ export default function RoomView() {
   const [isMember,      setIsMember]      = useState(false);
   const [requestSent,   setRequestSent]   = useState(false);
 
+  const roomBg = "linear-gradient(165deg, #E8DED0 0%, #DFD4C4 45%, #D9CDBD 100%)";
   const roomProperties = PROPERTIES.filter(p => roomPropIds.includes(p.id));
   const myVotes = {};
   votes.filter(v => v.user_id === user?.id).forEach(v => { myVotes[v.property_id] = v.vote; });
@@ -188,7 +189,7 @@ export default function RoomView() {
 
   // ── Error ────────────────────────────────────────────────────────────────
   if (error) return (
-    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{ height: "100dvh", background: roomBg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: B.ink, marginBottom: 10 }}>Something went wrong</div>
         <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.muted, marginBottom: 22 }}>{error}</div>
@@ -199,17 +200,12 @@ export default function RoomView() {
     </div>
   );
 
-  // ── Loading (show bar, placeholder for content) ───────────────────────────
-  if (loading) return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg }}>
-      <div style={{ flex: 1, minHeight: 0 }} />
-      <LoadingBar loading={true} />
-    </div>
-  );
+  // ── Loading ─────────────────────────────────────────────────────────────
+  if (loading) return <LoadingScreen loading={true} />;
 
   // ── Join-request gate ────────────────────────────────────────────────────
   if (!isMember && !isOwner) return (
-    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{ height: "100dvh", background: roomBg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{
         maxWidth: 420, width: "100%",
         background: "rgba(255,255,255,0.85)", backdropFilter: "blur(20px)",
@@ -257,132 +253,119 @@ export default function RoomView() {
     </div>
   );
 
-  // ── Loading ─────────────────────────────────────────────────────────────
-  if (loading) return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg }}>
-      <div style={{ flex: 1, minHeight: 0 }} />
-      <LoadingBar loading={true} />
-    </div>
-  );
-
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden", animation: "pageFadeIn 0.35s ease both" }}>
-      {/* ── Header ───────────────────────────────────────────────────────── */}
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: roomBg, overflow: "hidden", animation: "pageFadeIn 0.35s ease both" }}>
+      {/* ── Room header (distinct from Dashboard) ───────────────────────────── */}
       <header style={{
-        display: "flex", alignItems: "center", height: 54,
-        padding: "0 18px", gap: 10,
-        background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
-        borderBottom: `1px solid ${B.border}`, flexShrink: 0, zIndex: 50,
+        display: "flex", flexDirection: "column", flexShrink: 0, zIndex: 50,
+        background: "linear-gradient(180deg, rgba(255,252,247,0.95) 0%, rgba(249,244,236,0.9) 100%)",
+        borderRadius: "0 0 20px 20px", boxShadow: "0 4px 20px rgba(44,26,14,0.08)",
+        borderBottom: "none",
       }}>
-        <button onClick={() => nav("/dashboard")} style={{
-          display: "flex", alignItems: "center", gap: 4,
-          background: "none", border: "none", cursor: "pointer", padding: "6px 4px 6px 0",
-        }}>
-          <Icon d="M15 18l-6-6 6-6" size={16} color={B.muted} sw={2} />
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted }}>Dashboard</span>
-        </button>
+        {/* Top row: Back + Logo + Room code */}
+        <div style={{ display: "flex", alignItems: "center", padding: "12px 20px 10px", gap: 14 }}>
+          <button onClick={() => nav("/dashboard")} style={{
+            display: "flex", alignItems: "center", gap: 5,
+            padding: "8px 12px", borderRadius: 10,
+            background: "rgba(166,124,61,0.06)", border: `1px solid ${B.border}`,
+            fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted,
+            cursor: "pointer", transition: "all 0.15s",
+          }}>
+            <Icon d="M15 18l-6-6 6-6" size={14} color={B.muted} sw={2} />
+            Dashboard
+          </button>
 
-        <div style={{ width: 1, height: 18, background: B.border }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginLeft: 4 }}>
+            <LogoMark size={20} />
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, fontWeight: 500 }}>HomeBlend</span>
+          </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <LogoMark size={22} />
-          <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: B.ink, fontWeight: 400 }}>HomeBlend</span>
+          <div style={{ flex: 1 }} />
+
+          <button onClick={copyCode} style={{
+            display: "flex", alignItems: "center", gap: 6,
+            background: copied ? "rgba(74,124,89,0.12)" : B.goldBg,
+            border: `1.5px solid ${copied ? "rgba(74,124,89,0.35)" : B.border}`,
+            borderRadius: 10, padding: "7px 14px", cursor: "pointer", transition: "all 0.2s",
+          }}>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 800, color: copied ? "#4A7C59" : B.ink, letterSpacing: 2 }}>{code}</span>
+            {copied
+              ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A7C59" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+              : <Icon d={IC.copy} size={12} color={B.muted} sw={1.8} />
+            }
+          </button>
+          {copied && <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#4A7C59", fontWeight: 600, animation: "fadeIn 0.15s ease" }}>Copied!</span>}
         </div>
 
-        {/* Room code chip */}
-        <button onClick={copyCode} style={{
-          display: "flex", alignItems: "center", gap: 7,
-          background: copied ? "rgba(74,124,89,0.1)" : B.goldBg,
-          border: `1px solid ${copied ? "rgba(74,124,89,0.3)" : B.border}`,
-          borderRadius: 8, padding: "5px 12px", cursor: "pointer", transition: "all 0.2s",
-        }}>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 800, color: copied ? "#4A7C59" : B.ink, letterSpacing: 2.5 }}>{code}</span>
-          {copied
-            ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A7C59" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
-            : <Icon d={IC.copy} size={12} color={B.muted} sw={1.8} />
-          }
-        </button>
-        {copied && <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#4A7C59", fontWeight: 600, animation: "fadeIn 0.15s ease" }}>Copied!</span>}
-
-        <div style={{ flex: 1 }} />
-
-        {/* Join request notification (owner only) */}
-        {isOwner && joinRequests.filter(r => r.status === "pending").length > 0 && (
-          <button
-            onClick={() => setRightTab("requests")}
-            style={{
-              display: "flex", alignItems: "center", gap: 6,
-              padding: "5px 12px", borderRadius: 8,
-              background: "rgba(192,98,74,0.1)", border: "1px solid rgba(192,98,74,0.25)",
-              fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#C0624A",
-              cursor: "pointer",
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-            {joinRequests.filter(r => r.status === "pending").length} request{joinRequests.filter(r => r.status === "pending").length > 1 ? "s" : ""}
-          </button>
-        )}
-
-        {/* Voting progress */}
-        {roomProperties.length > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: B.muted }}>Group votes</div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.ink }}>{totalVotes} cast</div>
-            </div>
-            <div style={{ width: 52, height: 6, borderRadius: 3, background: "rgba(0,0,0,0.07)", overflow: "hidden" }}>
-              <div style={{ width: `${voteProgress}%`, height: "100%", background: B.gold, borderRadius: 3, transition: "width 0.5s ease" }} />
+        {/* Room name hero + meta row */}
+        <div style={{ padding: "6px 20px 16px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+          <div>
+            <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 500, color: B.ink, letterSpacing: 0.3, margin: 0, lineHeight: 1.2 }}>
+              {room?.name || "Room"}
+            </h1>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 4 }}>
+              {members.length} member{members.length !== 1 ? "s" : ""} · {roomProperties.length} propert{roomProperties.length === 1 ? "y" : "ies"}
             </div>
           </div>
-        )}
-
-        <div style={{ width: 1, height: 18, background: B.border }} />
-
-        {/* Member avatars */}
-        <div style={{ display: "flex", alignItems: "center" }}>
-          {members.slice(0, 6).map((m, i) => (
-            <div key={m.id || i} title={m.display_name} style={{
-              width: 28, height: 28, borderRadius: "50%",
-              background: m.avatar_color || B.gold,
-              border: "2px solid rgba(251,247,241,0.9)",
-              marginLeft: i > 0 ? -8 : 0,
-              display: "flex", alignItems: "center", justifyContent: "center",
-              fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700, color: "#fff",
-              zIndex: 6 - i, position: "relative",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.15)",
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {isOwner && joinRequests.filter(r => r.status === "pending").length > 0 && (
+              <button onClick={() => setRightTab("requests")} style={{
+                display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 10,
+                background: "rgba(192,98,74,0.1)", border: "1px solid rgba(192,98,74,0.25)",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#C0624A", cursor: "pointer",
+              }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                {joinRequests.filter(r => r.status === "pending").length} request{joinRequests.filter(r => r.status === "pending").length > 1 ? "s" : ""}
+              </button>
+            )}
+            {roomProperties.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(0,0,0,0.08)", overflow: "hidden" }}>
+                  <div style={{ width: `${voteProgress}%`, height: "100%", background: B.gold, borderRadius: 3, transition: "width 0.5s ease" }} />
+                </div>
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>{voterCount}/{members.length} voted</span>
+              </div>
+            )}
+            <div style={{ display: "flex", alignItems: "center" }}>
+              {members.slice(0, 5).map((m, i) => (
+                <div key={m.id || i} title={m.display_name} style={{
+                  width: 26, height: 26, borderRadius: "50%", background: m.avatar_color || B.gold,
+                  border: "2px solid rgba(255,252,247,0.95)", marginLeft: i > 0 ? -6 : 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff",
+                  zIndex: 5 - i, position: "relative", boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
+                }}>{m.display_name?.[0]?.toUpperCase()}</div>
+              ))}
+              {members.length > 5 && (
+                <div style={{ width: 26, height: 26, borderRadius: "50%", background: B.goldBg, border: "2px solid rgba(255,252,247,0.95)", marginLeft: -6, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.gold, fontWeight: 700 }}>+{members.length - 5}</span>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowAddDrawer(true)} style={{
+              display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+              border: "none", background: B.ink, color: "#FAF6EE",
+              fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
             }}>
-              {m.display_name?.[0]?.toUpperCase()}
-            </div>
-          ))}
-          {members.length > 6 && (
-            <div style={{ width: 28, height: 28, borderRadius: "50%", background: B.goldBg, border: `2px solid rgba(251,247,241,0.9)`, marginLeft: -8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.gold, fontWeight: 700 }}>+{members.length - 6}</span>
-            </div>
-          )}
+              <Icon d={IC.plus} size={12} color="#FAF6EE" sw={2} />
+              Add
+            </button>
+          </div>
         </div>
-
-        <button onClick={() => setShowAddDrawer(true)} style={{
-          display: "flex", alignItems: "center", gap: 5,
-          padding: "6px 12px", borderRadius: 8,
-          border: `1px solid ${B.border}`, background: B.ink, color: "#FAF6EE",
-          fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 500,
-          cursor: "pointer",
-        }}>
-          <Icon d={IC.plus} size={13} color="#FAF6EE" sw={2} />
-          Add
-        </button>
       </header>
 
-      {/* ── Body ─────────────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
+      {/* ── Body (card-style panels, different from Dashboard) ────────────── */}
+      <div style={{ flex: 1, display: "flex", gap: 12, padding: "12px 16px 16px", overflow: "hidden", minHeight: 0 }}>
 
-        {/* ─── LEFT: Live Leaderboard ───────────────────────────────────── */}
-        <div style={{ width: 390, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
+        {/* ─── LEFT: Leaderboard card ─────────────────────────────────────── */}
+        <div style={{
+          width: 380, flexShrink: 0, display: "flex", flexDirection: "column",
+          background: "rgba(255,252,247,0.97)", borderRadius: 16, overflow: "hidden",
+          boxShadow: "0 2px 16px rgba(44,26,14,0.06)", border: `1px solid ${B.border}`,
+        }}>
 
           {/* Sub-header */}
-          <div style={{ padding: "13px 16px 12px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0 }}>
+          <div style={{ padding: "14px 18px 12px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.6)", flexShrink: 0, borderRadius: "16px 16px 0 0" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
@@ -481,15 +464,19 @@ export default function RoomView() {
           </div>
         </div>
 
-        {/* ─── RIGHT: Map / Blend / Requests tabs ─────────────────────── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* ─── RIGHT: Tabbed content card ─────────────────────────────────── */}
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column", overflow: "hidden",
+          background: "rgba(255,252,247,0.97)", borderRadius: 16,
+          boxShadow: "0 2px 16px rgba(44,26,14,0.06)", border: `1px solid ${B.border}`,
+        }}>
 
-          {/* Tab bar */}
+          {/* Pill-style tab bar */}
           <div style={{
-            display: "flex", alignItems: "center",
+            display: "flex", alignItems: "center", gap: 6,
+            padding: "10px 14px", flexShrink: 0,
+            background: "rgba(251,247,241,0.5)", borderRadius: "16px 16px 0 0",
             borderBottom: `1px solid ${B.border}`,
-            background: "rgba(251,247,241,0.92)",
-            flexShrink: 0, padding: "0 18px",
           }}>
             {[
               ["map",   IC.map,   "Map"],
@@ -502,41 +489,32 @@ export default function RoomView() {
                 onClick={() => setRightTab(tab)}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
-                  padding: "13px 16px", border: "none", background: "transparent",
+                  padding: "8px 14px", border: "none",
+                  background: rightTab === tab ? B.gold : "transparent",
+                  color: rightTab === tab ? "#FAF6EE" : B.muted,
                   fontFamily: "'DM Sans', sans-serif", fontSize: 12,
-                  fontWeight: rightTab === tab ? 600 : 400,
-                  color: rightTab === tab ? B.ink : B.muted,
-                  cursor: "pointer",
-                  borderBottom: `2px solid ${rightTab === tab ? B.gold : "transparent"}`,
-                  marginBottom: -1, transition: "color 0.15s, border-color 0.15s",
+                  fontWeight: rightTab === tab ? 600 : 500,
+                  cursor: "pointer", borderRadius: 10,
+                  transition: "all 0.18s",
                 }}
               >
-                <Icon d={icon} size={13} color={rightTab === tab ? B.gold : B.muted} sw={1.8} />
+                <Icon d={icon} size={13} color={rightTab === tab ? "#FAF6EE" : B.muted} sw={1.8} />
                 {label}
                 {tab === "blend" && votes.length > 0 && (
-                  <span style={{
-                    width: 5, height: 5, borderRadius: "50%", background: "#5C8A6B",
-                    marginLeft: 1,
-                  }} />
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: rightTab === tab ? "rgba(255,255,255,0.9)" : "#5C8A6B", marginLeft: 1 }} />
                 )}
                 {tab === "picks" && roomProperties.length > 0 && (
-                  <span style={{
-                    width: 5, height: 5, borderRadius: "50%", background: B.gold,
-                    marginLeft: 1,
-                  }} />
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: rightTab === tab ? "rgba(255,255,255,0.9)" : B.gold, marginLeft: 1 }} />
                 )}
                 {tab === "requests" && joinRequests.filter(r=>r.status==="pending").length > 0 && (
-                  <span style={{
-                    width: 5, height: 5, borderRadius: "50%", background: "#C0624A",
-                    marginLeft: 1, animation: "pulse 1.5s ease infinite",
-                  }} />
+                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: rightTab === tab ? "rgba(255,255,255,0.9)" : "#C0624A", marginLeft: 1, animation: "pulse 1.5s ease infinite" }} />
                 )}
               </button>
             ))}
           </div>
 
           {/* Tab content */}
-          <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          <div style={{ flex: 1, position: "relative", overflow: "hidden", borderRadius: "0 0 16px 16px" }}>
 
             {/* Map */}
             <div style={{ position: "absolute", inset: 0, opacity: rightTab === "map" ? 1 : 0, pointerEvents: rightTab === "map" ? "auto" : "none", transition: "opacity 0.2s" }}>

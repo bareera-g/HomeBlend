@@ -51,20 +51,31 @@ export default function LoadingBar({ loading }) {
         bottom: 0,
         left: 0,
         right: 0,
-        height: 3,
-        background: "rgba(166,124,61,0.12)",
+        paddingBottom: "max(14px, env(safe-area-inset-bottom, 14px))",
+        paddingLeft: "max(14px, env(safe-area-inset-left, 0))",
+        paddingRight: "max(14px, env(safe-area-inset-right, 0))",
         zIndex: 9999,
-        overflow: "hidden",
+        boxSizing: "border-box",
       }}
     >
       <div
         style={{
-          height: "100%",
-          width: `${progress}%`,
-          background: `linear-gradient(90deg, ${B.gold} 0%, rgba(166,124,61,0.85) 100%)`,
-          transition: progress === 100 ? "width 0.2s ease, opacity 0.25s ease" : "none",
+          height: 5,
+          background: "rgba(166,124,61,0.18)",
+          borderRadius: 3,
+          overflow: "hidden",
         }}
-      />
+      >
+        <div
+          style={{
+            height: "100%",
+            width: `${progress}%`,
+            background: `linear-gradient(90deg, ${B.gold} 0%, rgba(166,124,61,0.85) 100%)`,
+            transition: progress === 100 ? "width 0.2s ease, opacity 0.25s ease" : "none",
+            borderRadius: 3,
+          }}
+        />
+      </div>
     </div>
   );
 }

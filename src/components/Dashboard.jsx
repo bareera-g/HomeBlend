@@ -14,9 +14,20 @@ import {
 import { PROPERTIES } from "../data/properties.js";
 import MapPanel from "./MapPanel.jsx";
 import LoadingBar from "./LoadingBar.jsx";
+import LoadingScreen from "./LoadingScreen.jsx";
 
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
 const IMG_H = 230;
+
+/** Price steps: $100 at low end → $250 mid → $500 at high end */
+const PRICE_STEPS = [
+  1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000,
+  2250, 2500, 2750, 3000, 3500, 4000, 4500, 5000,
+];
+function priceToIndex(p) {
+  const idx = PRICE_STEPS.findIndex(s => s >= p);
+  return idx >= 0 ? idx : PRICE_STEPS.length - 1;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
@@ -57,9 +68,12 @@ export default function Dashboard() {
   const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
 
   // Refs for custom drag system
-  const dragRef      = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
-  const roomCardRefs = useRef({});   // roomId → DOM node
-  const ghostRef     = useRef(null);
+  const dragRef         = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
+  const roomCardRefs    = useRef({});   // roomId → DOM node
+  const createNewRoomRef = useRef(null); // drop zone for "create new room with this property"
+  const ghostRef        = useRef(null);
+
+  const CREATE_NEW_ROOM_ID = "__create_new__";
 
   // ── Data fetch ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -135,7 +149,7 @@ export default function Dashboard() {
   }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
 
   const activeFilters = [
-    maxPrice < 5000, minBeds > 0, minBaths > 0,
+    maxPrice < PRICE_STEPS[PRICE_STEPS.length - 1], minBeds > 0, minBaths > 0,
     petOnly, parkingReq, laundryReq, sortBy !== "default",
   ].filter(Boolean).length;
 
@@ -177,6 +191,41 @@ export default function Dashboard() {
       setNewRoomName("");
     } catch (e) {
       console.error("[HomeBlend] createRoom unexpected error:", e);
+    } finally { setBusy(false); }
+  }
+
+  async function handleCreateRoomWithProperty(propertyId) {
+    const prop = PROPERTIES.find(p => p.id === propertyId);
+    const suggestedName = prop ? `${prop.title?.slice(0, 24) || "New"} Room` : `Room ${rooms.length + 1}`;
+    setBusy(true);
+    try {
+      let room;
+      try {
+        room = await createRoom(suggestedName, user.id, profile?.display_name || user.display_name || "Me", profile?.avatar_color || user.avatar_color || "#A67C3D");
+      } catch (dbErr) {
+        const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+        console.warn("[HomeBlend] DB error creating room:", dbErr.message);
+        room = { id: `local-${fallbackCode}`, name: suggestedName, room_code: fallbackCode, created_by: user.id, local: true };
+        setShowDbBanner(true);
+        setDbError(dbErr.message);
+      }
+      setRooms(prev => [{ id: room.id, name: room.name || suggestedName, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
+      setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 1, propIds: [propertyId] } }));
+      setCreatedRoom({ name: room.name || suggestedName, room_code: room.room_code });
+      setNewRoomName("");
+      setShowCreateModal(true);
+      try {
+        await addPropertyToRoom(room.id, propertyId, user.id);
+      } catch (err) {
+        console.error("Add property to new room failed:", err);
+        setRoomMeta(prev => {
+          const cur = prev[room.id];
+          if (!cur) return prev;
+          return { ...prev, [room.id]: { ...cur, propertyCount: 0, propIds: [] } };
+        });
+      }
+    } catch (e) {
+      console.error("[HomeBlend] createRoomWithProperty unexpected error:", e);
     } finally { setBusy(false); }
   }
 
@@ -276,7 +325,7 @@ export default function Dashboard() {
       ghostRef.current.style.top  = `${e.clientY - 80}px`;
     }
 
-    // Hit-test room cards
+    // Hit-test: first room cards, then "create new room" drop zone
     let overRoom = null;
     for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
       if (!el) continue;
@@ -287,6 +336,13 @@ export default function Dashboard() {
         break;
       }
     }
+    if (!overRoom && createNewRoomRef.current) {
+      const rect = createNewRoomRef.current.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right &&
+          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
+        overRoom = CREATE_NEW_ROOM_ID;
+      }
+    }
     setDragOverRoom(overRoom);
   }, []);
 
@@ -294,7 +350,7 @@ export default function Dashboard() {
     const dr = dragRef.current;
     if (!dr.active || !dr.propId) { cleanupDrag(); return; }
 
-    // Find which room was dropped on
+    // Find which room (or create-new zone) was dropped on
     let droppedRoom = null;
     for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
       if (!el) continue;
@@ -305,9 +361,22 @@ export default function Dashboard() {
         break;
       }
     }
+    if (!droppedRoom && createNewRoomRef.current) {
+      const rect = createNewRoomRef.current.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right &&
+          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
+        droppedRoom = CREATE_NEW_ROOM_ID;
+      }
+    }
 
     const propId = dr.propId;
     cleanupDrag();
+
+    if (droppedRoom === CREATE_NEW_ROOM_ID) {
+      // Create new room with this property
+      handleCreateRoomWithProperty(propId);
+      return;
+    }
 
     if (droppedRoom) {
       const room = rooms.find(r => r.id === droppedRoom);
@@ -331,7 +400,7 @@ export default function Dashboard() {
         });
       }
     }
-  }, [rooms, user, cleanupDrag]);
+  }, [rooms, user, cleanupDrag, handleCreateRoomWithProperty]);
 
   const onCardMouseDown = useCallback((e, propId) => {
     if (e.button !== 0) return; // left button only
@@ -343,7 +412,7 @@ export default function Dashboard() {
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden" }}>
       {loading ? (
-        <div style={{ flex: 1, minHeight: 0, background: B.bg }} />
+        <LoadingScreen loading={true} />
       ) : (
         <>
       {/* ── Header ──────────────────────────────────────────────────────────── */}
@@ -374,14 +443,20 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Price slider — in header, matching screenshot */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {/* Price slider — larger thumb, non-linear increments (small → large) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
             Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
           </span>
-          <input type="range" min={1000} max={5000} step={100} value={maxPrice}
-            onChange={e => setMaxPrice(+e.target.value)}
-            style={{ accentColor: B.gold, width: 90, cursor: "pointer" }} />
+          <input
+            type="range"
+            className="price-slider"
+            min={0}
+            max={PRICE_STEPS.length - 1}
+            step={1}
+            value={priceToIndex(maxPrice)}
+            onChange={e => setMaxPrice(PRICE_STEPS[+e.target.value])}
+          />
         </div>
 
         <div style={{ flex: 1 }} />
@@ -590,42 +665,42 @@ export default function Dashboard() {
         <div
           style={{
             position: "absolute", top: 0, right: 0, bottom: 0,
-            width: 404,
+            width: 420,
             display: "flex", flexDirection: "row",
             transform: showRooms ? "translateX(0)" : "translateX(376px)",
             transition: "transform 0.32s cubic-bezier(.16,1,.3,1)",
             zIndex: 45, pointerEvents: "auto",
           }}
         >
-          {/* Pull tab (left edge — attached to panel) */}
+          {/* Pull tab — Donkey Brown, larger, eye-catching */}
           <button
             onClick={() => setShowRooms(v => !v)}
             style={{
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7,
-              width: 28, flexShrink: 0,
-              borderRadius: "12px 0 0 12px",
-              background: "rgba(251,247,241,0.97)", backdropFilter: "blur(16px)",
-              border: `1px solid ${B.border}`, borderRight: "none",
-              boxShadow: "-4px 0 20px rgba(40,24,8,0.12)",
-              cursor: "pointer", padding: 0,
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
+              width: 44, flexShrink: 0,
+              borderRadius: "14px 0 0 14px",
+              background: "linear-gradient(180deg, #6B5344 0%, #5C4033 50%, #523829 100%)",
+              border: "1px solid rgba(92,64,51,0.5)", borderRight: "none",
+              boxShadow: "-6px 0 24px rgba(44,26,14,0.25), inset 0 1px 0 rgba(255,255,255,0.08)",
+              cursor: "pointer", padding: "12px 0",
               alignSelf: "center",
             }}
             title={showRooms ? "Close rooms" : "Open rooms"}
           >
-            <Icon d={IC.home} size={12} color={B.gold} sw={1.8} />
+            <Icon d={IC.home} size={18} color="#F5EDE4" sw={1.8} />
             <span style={{
               writingMode: "vertical-rl",
               transform: "rotate(180deg)",
               fontFamily: "'DM Sans', sans-serif",
-              fontSize: 8.5, fontWeight: 700,
-              letterSpacing: 1.8, textTransform: "uppercase",
-              color: B.ink, userSelect: "none",
+              fontSize: 11, fontWeight: 700,
+              letterSpacing: 2.2, textTransform: "uppercase",
+              color: "#F5EDE4", userSelect: "none",
             }}>Rooms</span>
             {rooms.length > 0 && (
               <span style={{
-                width: 16, height: 16, borderRadius: "50%",
-                background: B.gold, display: "flex", alignItems: "center", justifyContent: "center",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 800, color: "#FAF6EE", flexShrink: 0,
+                width: 20, height: 20, borderRadius: "50%",
+                background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 800, color: "#F5EDE4", flexShrink: 0,
               }}>{rooms.length}</span>
             )}
           </button>
@@ -698,14 +773,57 @@ export default function Dashboard() {
                   textAlign: "center", animation: "pulse 1.5s ease infinite",
                 }}>
                   <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, lineHeight: 1.5 }}>
-                    Drop onto a room to add this property
+                    Drop onto a room — or create a new one below
                   </p>
                 </div>
               )}
 
               {/* Room cards */}
               <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 24px", display: "flex", flexDirection: "column", gap: 9 }}>
-                {rooms.length === 0 ? (
+                {/* "Create new room" drop zone — visible when dragging */}
+                {dragging && (
+                  <div
+                    ref={createNewRoomRef}
+                    style={{
+                      borderRadius: 13,
+                      border: dragOverRoom === CREATE_NEW_ROOM_ID
+                        ? `2px solid ${B.gold}`
+                        : `1.5px dashed rgba(166,124,61,0.55)`,
+                      background: dragOverRoom === CREATE_NEW_ROOM_ID
+                        ? "rgba(166,124,61,0.12)"
+                        : "rgba(166,124,61,0.05)",
+                      padding: "18px 15px",
+                      cursor: "copy",
+                      transition: "all 0.2s cubic-bezier(.16,1,.3,1)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: 10,
+                      flexShrink: 0,
+                      transform: dragOverRoom === CREATE_NEW_ROOM_ID ? "scale(1.02)" : "scale(1)",
+                      boxShadow: dragOverRoom === CREATE_NEW_ROOM_ID
+                        ? "0 6px 28px rgba(166,124,61,0.25)"
+                        : "0 2px 12px rgba(80,50,10,0.06)",
+                    }}
+                  >
+                    <div style={{
+                      width: 36, height: 36, borderRadius: "50%",
+                      background: "rgba(166,124,61,0.15)",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}>
+                      <Icon d={IC.plus} size={18} color={B.gold} sw={2.2} />
+                    </div>
+                    <div style={{ textAlign: "left" }}>
+                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: B.gold }}>
+                        {dragOverRoom === CREATE_NEW_ROOM_ID ? "Release to create room" : "Drop to create new room"}
+                      </div>
+                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 2 }}>
+                        Room will include this property
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {rooms.length === 0 && !dragging ? (
                   <div style={{ padding: "36px 16px", textAlign: "center" }}>
                     <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(166,124,61,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
                       <Icon d={IC.home} size={18} color={B.gold} sw={1.5} />
@@ -931,7 +1049,7 @@ export default function Dashboard() {
       )}
         </>
       )}
-      <LoadingBar loading={loading} />
+      {!loading && <LoadingBar loading={false} />}
     </div>
   );
 }
