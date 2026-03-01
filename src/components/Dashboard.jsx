@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { B, Icon, IC, LogoMark } from "../Brand.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import {
-  testConnection,
   ensureProfile,
   fetchUserRooms, fetchSavedPropertyIds,
   saveProperty, unsaveProperty,
@@ -13,25 +12,14 @@ import {
 } from "../lib/firebase.js";
 import { PROPERTIES } from "../data/properties.js";
 import MapPanel from "./MapPanel.jsx";
-import LoadingBar from "./LoadingBar.jsx";
-import LoadingScreen from "./LoadingScreen.jsx";
 
+function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
 const IMG_H = 230;
 
-/** Price steps: $100 at low end → $250 mid → $500 at high end */
-const PRICE_STEPS = [
-  1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000,
-  2250, 2500, 2750, 3000, 3500, 4000, 4500, 5000,
-];
-function priceToIndex(p) {
-  const idx = PRICE_STEPS.findIndex(s => s >= p);
-  return idx >= 0 ? idx : PRICE_STEPS.length - 1;
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
+  const { user, signOut }  = useAuth();
   const nav       = useNavigate();
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -65,66 +53,41 @@ export default function Dashboard() {
   const [newRoomName,     setNewRoomName]    = useState("");
   const [createdRoom,     setCreatedRoom]    = useState(null);   // { name, room_code } after creation
   const [codeCopied,      setCodeCopied]     = useState(false);
-  const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
-  const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
 
   // Refs for custom drag system
-  const dragRef         = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
-  const roomCardRefs    = useRef({});   // roomId → DOM node
-  const createNewRoomRef = useRef(null); // drop zone for "create new room with this property"
-  const ghostRef        = useRef(null);
-
-  const CREATE_NEW_ROOM_ID = "__create_new__";
+  const dragRef      = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
+  const roomCardRefs = useRef({});   // roomId → DOM node
+  const ghostRef     = useRef(null);
 
   // ── Data fetch ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
-    const loadTimeoutMs = 15000;
     async function init() {
       setLoading(true);
-      setDbError(null);
       try {
-        const conn = await testConnection();
-        if (!conn.ok) {
-          setDbError(conn.error);
-          setShowDbBanner(true);
-          setProfile({ display_name: user.display_name || "You", avatar_color: "#A67C3D" });
-          setRooms([]);
-          setSavedIds([]);
-          return;
-        }
-        const initPromise = (async () => {
-          const p = await ensureProfile(user.id, user.display_name);
-          setProfile(p || { display_name: user.display_name || "You", avatar_color: "#A67C3D" });
-          const [r, s] = await Promise.all([
-            fetchUserRooms(user.id),
-            fetchSavedPropertyIds(user.id),
-          ]);
-          setRooms(r);
-          setSavedIds(s);
-          if (r.length > 0) {
-            const meta = {};
-            await Promise.all(r.map(async room => {
-              const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
-              meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
-            }));
-            setRoomMeta(meta);
-          }
-        })();
-        await Promise.race([
-          initPromise,
-          new Promise((_, rej) => setTimeout(() => rej(new Error("Load timeout")), loadTimeoutMs)),
+        const p = await ensureProfile(user.id, user.email?.split("@")[0]);
+        setProfile(p || { display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
+        const [r, s] = await Promise.all([
+          fetchUserRooms(user.id),
+          fetchSavedPropertyIds(user.id),
         ]);
+        setRooms(r);
+        setSavedIds(s);
+        if (r.length > 0) {
+          const meta = {};
+          await Promise.all(r.map(async room => {
+            const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
+            meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
+          }));
+          setRoomMeta(meta);
+        }
       } catch (e) {
         console.error("[HomeBlend] Init error:", e);
         setDbError(e.message);
         setShowDbBanner(true);
-        setProfile({ display_name: user.display_name || "You", avatar_color: "#A67C3D" });
-        setRooms([]);
-        setSavedIds([]);
-      } finally {
-        setLoading(false);
-      }
+        // Still set a fallback profile so the UI works
+        setProfile({ display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
+      } finally { setLoading(false); }
     }
     init();
   }, [user]);
@@ -150,7 +113,7 @@ export default function Dashboard() {
   }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
 
   const activeFilters = [
-    maxPrice < PRICE_STEPS[PRICE_STEPS.length - 1], minBeds > 0, minBaths > 0,
+    maxPrice < 5000, minBeds > 0, minBaths > 0,
     petOnly, parkingReq, laundryReq, sortBy !== "default",
   ].filter(Boolean).length;
 
@@ -178,7 +141,9 @@ export default function Dashboard() {
     try {
       let room;
       try {
-        room = await createRoom(name, user.id, profile?.display_name || user.display_name || "Me", profile?.avatar_color || user.avatar_color || "#A67C3D");
+        room = await createRoom(name, user.id);
+        // Update the owner member row with the real display name (createRoom uses "Owner" as placeholder)
+        await joinRoom(room.id, user.id, profile?.display_name || user.email?.split("@")[0] || "Me", profile?.avatar_color || "#A67C3D");
       } catch (dbErr) {
         const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         console.warn("[HomeBlend] DB error creating room:", dbErr.message);
@@ -195,41 +160,6 @@ export default function Dashboard() {
     } finally { setBusy(false); }
   }
 
-  async function handleCreateRoomWithProperty(roomName, propertyId) {
-    const name = (roomName || "").trim() || `Room ${rooms.length + 1}`;
-    setBusy(true);
-    try {
-      let room;
-      try {
-        room = await createRoom(name, user.id, profile?.display_name || user.display_name || "Me", profile?.avatar_color || user.avatar_color || "#A67C3D");
-      } catch (dbErr) {
-        const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        console.warn("[HomeBlend] DB error creating room:", dbErr.message);
-        room = { id: `local-${fallbackCode}`, name, room_code: fallbackCode, created_by: user.id, local: true };
-        setShowDbBanner(true);
-        setDbError(dbErr.message);
-      }
-      setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
-      setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 1, propIds: [propertyId] } }));
-      setCreatedRoom({ name: room.name || name, room_code: room.room_code });
-      setNewRoomName("");
-      setPendingCreatePropertyId(null);
-      setShowCreateModal(true);
-      try {
-        await addPropertyToRoom(room.id, propertyId, user.id);
-      } catch (err) {
-        console.error("Add property to new room failed:", err);
-        setRoomMeta(prev => {
-          const cur = prev[room.id];
-          if (!cur) return prev;
-          return { ...prev, [room.id]: { ...cur, propertyCount: 0, propIds: [] } };
-        });
-      }
-    } catch (e) {
-      console.error("[HomeBlend] createRoomWithProperty unexpected error:", e);
-    } finally { setBusy(false); }
-  }
-
   async function handleJoin(e) {
     e.preventDefault();
     const code = joinCode.trim().toUpperCase();
@@ -240,11 +170,6 @@ export default function Dashboard() {
       if (!room) { setJoinErr("Room not found."); setBusy(false); return; }
       nav(`/room/${code}`);
     } catch { setJoinErr("Could not join."); } finally { setBusy(false); }
-  }
-
-  function handleOpenRoom(e, code, name) {
-    setRoomTransition({ code, name: name || "Unnamed Room" });
-    setTimeout(() => nav(`/room/${code}`), 320);
   }
 
   function resetFilters() {
@@ -326,7 +251,7 @@ export default function Dashboard() {
       ghostRef.current.style.top  = `${e.clientY - 80}px`;
     }
 
-    // Hit-test: first room cards, then "create new room" drop zone
+    // Hit-test room cards
     let overRoom = null;
     for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
       if (!el) continue;
@@ -337,13 +262,6 @@ export default function Dashboard() {
         break;
       }
     }
-    if (!overRoom && createNewRoomRef.current) {
-      const rect = createNewRoomRef.current.getBoundingClientRect();
-      if (e.clientX >= rect.left && e.clientX <= rect.right &&
-          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-        overRoom = CREATE_NEW_ROOM_ID;
-      }
-    }
     setDragOverRoom(overRoom);
   }, []);
 
@@ -351,7 +269,7 @@ export default function Dashboard() {
     const dr = dragRef.current;
     if (!dr.active || !dr.propId) { cleanupDrag(); return; }
 
-    // Find which room (or create-new zone) was dropped on
+    // Find which room was dropped on
     let droppedRoom = null;
     for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
       if (!el) continue;
@@ -362,26 +280,9 @@ export default function Dashboard() {
         break;
       }
     }
-    if (!droppedRoom && createNewRoomRef.current) {
-      const rect = createNewRoomRef.current.getBoundingClientRect();
-      if (e.clientX >= rect.left && e.clientX <= rect.right &&
-          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-        droppedRoom = CREATE_NEW_ROOM_ID;
-      }
-    }
 
     const propId = dr.propId;
     cleanupDrag();
-
-    if (droppedRoom === CREATE_NEW_ROOM_ID) {
-      // Open create modal so user can name the room (room will include this property)
-      const prop = PROPERTIES.find(p => p.id === propId);
-      const suggestedName = prop ? `${prop.title?.slice(0, 24) || "New"} Room` : "";
-      setPendingCreatePropertyId(propId);
-      setNewRoomName(suggestedName);
-      setShowCreateModal(true);
-      return;
-    }
 
     if (droppedRoom) {
       const room = rooms.find(r => r.id === droppedRoom);
@@ -414,12 +315,16 @@ export default function Dashboard() {
     window.addEventListener("mouseup", handleMouseUp);
   }, [handleMouseMove, handleMouseUp]);
 
+  // ── Loading ───────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ width: 34, height: 34, borderRadius: "50%", border: `3px solid rgba(166,124,61,0.18)`, borderTopColor: B.gold, animation: "spin 0.7s linear infinite" }} />
+    </div>
+  );
+
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden" }}>
-      {loading ? (
-        <LoadingScreen loading={true} />
-      ) : (
-        <>
+
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header style={{
         display: "flex", alignItems: "center", gap: 12, height: 54,
@@ -446,6 +351,16 @@ export default function Dashboard() {
               cursor: "pointer", transition: "all 0.18s",
             }}>{l}</button>
           ))}
+        </div>
+
+        {/* Price slider — in header, matching screenshot */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
+            Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
+          </span>
+          <input type="range" min={1000} max={5000} step={100} value={maxPrice}
+            onChange={e => setMaxPrice(+e.target.value)}
+            style={{ accentColor: B.gold, width: 90, cursor: "pointer" }} />
         </div>
 
         <div style={{ flex: 1 }} />
@@ -483,7 +398,7 @@ export default function Dashboard() {
           <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink, fontWeight: 500 }}>
             {profile?.display_name}
           </span>
-          <button onClick={() => { signOut(); nav("/auth", { replace: true }); }} style={{
+          <button onClick={async () => { await signOut(); nav("/auth", { replace: true }); }} style={{
             padding: "5px 12px", borderRadius: 7,
             border: `1px solid ${B.border}`, background: "transparent",
             fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted,
@@ -509,8 +424,8 @@ export default function Dashboard() {
               Database not set up.{" "}
             </span>
             <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8C5540" }}>
-              Ensure Firestore is enabled in Firebase Console → Build → Firestore Database. Deploy <code style={{ background: "rgba(0,0,0,0.06)", padding: "1px 4px", borderRadius: 3 }}>firestore.rules</code> if needed.
-              {dbError && <span style={{ display: "block", marginTop: 4, fontSize: 10, opacity: 0.9 }}>{dbError}</span>}
+              Firestore database not reachable. Check your Firebase project settings and ensure Firestore is enabled.
+              {dbError && <span style={{ display: "block", marginTop: 2, fontSize: 10, opacity: 0.8 }}>Error: {dbError}</span>}
             </span>
           </div>
           <button
@@ -528,7 +443,7 @@ export default function Dashboard() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
 
         {/* ── Properties panel ──────────────────────────────────────────────── */}
-        <div style={{ width: 440, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
+        <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
           {/* Sub-header: category chips + count */}
           <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
@@ -570,24 +485,6 @@ export default function Dashboard() {
           {/* Compact filter dropdown (inside properties panel) */}
           {showFilters && (
             <div style={{ padding: "12px 11px 10px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0, animation: "fadeIn 0.18s ease" }}>
-              {/* Price */}
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 6 }}>Max price</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
-                    Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
-                  </span>
-                  <input
-                    type="range"
-                    className="price-slider"
-                    min={0}
-                    max={PRICE_STEPS.length - 1}
-                    step={1}
-                    value={priceToIndex(maxPrice)}
-                    onChange={e => setMaxPrice(PRICE_STEPS[+e.target.value])}
-                  />
-                </div>
-              </div>
               {/* Beds */}
               <div style={{ marginBottom: 9 }}>
                 <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bedrooms</div>
@@ -666,60 +563,47 @@ export default function Dashboard() {
             onSelect={p => setSelected(prev => prev?.id === p.id ? null : p)}
           />
 
+          {/* Rooms toggle FAB (when panel is closed) */}
+          {!showRooms && (
+            <button
+              onClick={() => setShowRooms(true)}
+              style={{
+                position: "absolute", bottom: 24, right: 24,
+                display: "flex", alignItems: "center", gap: 7,
+                padding: "10px 18px", borderRadius: 12,
+                background: "rgba(251,247,241,0.96)", backdropFilter: "blur(16px)",
+                border: `1px solid ${B.border}`,
+                boxShadow: "0 4px 24px rgba(40,24,8,0.15)",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, color: B.ink,
+                cursor: "pointer", transition: "all 0.18s",
+                animation: "slideUp 0.25s ease",
+              }}
+            >
+              <Icon d={IC.home} size={14} color={B.gold} sw={1.8} />
+              My Rooms
+              {rooms.length > 0 && (
+                <span style={{ padding: "1px 6px", borderRadius: 10, background: B.gold, fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff" }}>{rooms.length}</span>
+              )}
+            </button>
+          )}
         </div>
 
-        {/* ── Rooms panel + tab (single sliding unit) ───────────────────────── */}
-        <div
-          style={{
-            position: "absolute", top: 0, right: 0, bottom: 0,
-            width: 420,
-            display: "flex", flexDirection: "row",
-            transform: showRooms ? "translateX(0)" : "translateX(376px)",
-            transition: "transform 0.32s cubic-bezier(.16,1,.3,1)",
-            zIndex: 45, pointerEvents: "auto",
-          }}
-        >
-          {/* Pull tab — Donkey Brown, larger, eye-catching */}
-          <button
-            onClick={() => setShowRooms(v => !v)}
-            style={{
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10,
-              width: 44, flexShrink: 0,
-              borderRadius: "14px 0 0 14px",
-              background: "linear-gradient(180deg, #6B5344 0%, #5C4033 50%, #523829 100%)",
-              border: "1px solid rgba(92,64,51,0.5)", borderRight: "none",
-              boxShadow: "-6px 0 24px rgba(44,26,14,0.25), inset 0 1px 0 rgba(255,255,255,0.08)",
-              cursor: "pointer", padding: "12px 0",
-              alignSelf: "center",
-            }}
-            title={showRooms ? "Close rooms" : "Open rooms"}
-          >
-            <Icon d={IC.home} size={18} color="#F5EDE4" sw={1.8} />
-            <span style={{
-              writingMode: "vertical-rl",
-              transform: "rotate(180deg)",
-              fontFamily: "'DM Sans', sans-serif",
-              fontSize: 11, fontWeight: 700,
-              letterSpacing: 2.2, textTransform: "uppercase",
-              color: "#F5EDE4", userSelect: "none",
-            }}>Rooms</span>
-            {rooms.length > 0 && (
-              <span style={{
-                width: 20, height: 20, borderRadius: "50%",
-                background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 800, color: "#F5EDE4", flexShrink: 0,
-              }}>{rooms.length}</span>
-            )}
-          </button>
-
-          {/* Panel content */}
-          <div style={{
-            width: 376, flexShrink: 0,
-            background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
-            borderLeft: `1px solid ${B.border}`,
-            boxShadow: "-16px 0 60px rgba(40,24,8,0.15)",
-            display: "flex", flexDirection: "column", overflow: "hidden",
-          }}>
+        {/* ── Rooms slide-out panel (from right, overlays map) ──────────────── */}
+        {showRooms && (
+          <>
+            {/* Backdrop click-away */}
+            <div
+              onClick={() => { if (!dragging) setShowRooms(false); }}
+              style={{ position: "absolute", inset: 0, zIndex: 40 }}
+            />
+            <div style={{
+              position: "absolute", top: 0, right: 0, bottom: 0, width: 360,
+              background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
+              borderLeft: `1px solid ${B.border}`,
+              boxShadow: "-16px 0 60px rgba(40,24,8,0.15)",
+              animation: "slideInR 0.28s cubic-bezier(.16,1,.3,1)",
+              display: "flex", flexDirection: "column", zIndex: 45, overflow: "hidden",
+            }}>
               {/* Rooms header */}
               <div style={{ padding: "18px 18px 14px", borderBottom: `1px solid ${B.border}`, flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
@@ -736,7 +620,7 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setPendingCreatePropertyId(null); setShowCreateModal(true); }} disabled={busy} style={{
+                <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setShowCreateModal(true); }} disabled={busy} style={{
                   width: "100%", padding: "9px 0", borderRadius: 8,
                   background: busy ? "rgba(44,26,14,0.35)" : B.ink, border: "none", color: "#FAF6EE",
                   fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
@@ -780,57 +664,14 @@ export default function Dashboard() {
                   textAlign: "center", animation: "pulse 1.5s ease infinite",
                 }}>
                   <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, lineHeight: 1.5 }}>
-                    Drop onto a room — or create a new one below
+                    Drop onto a room to add this property
                   </p>
                 </div>
               )}
 
               {/* Room cards */}
               <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 24px", display: "flex", flexDirection: "column", gap: 9 }}>
-                {/* "Create new room" drop zone — visible when dragging */}
-                {dragging && (
-                  <div
-                    ref={createNewRoomRef}
-                    style={{
-                      borderRadius: 13,
-                      border: dragOverRoom === CREATE_NEW_ROOM_ID
-                        ? `2px solid ${B.gold}`
-                        : `1.5px dashed rgba(166,124,61,0.55)`,
-                      background: dragOverRoom === CREATE_NEW_ROOM_ID
-                        ? "rgba(166,124,61,0.12)"
-                        : "rgba(166,124,61,0.05)",
-                      padding: "18px 15px",
-                      cursor: "copy",
-                      transition: "all 0.2s cubic-bezier(.16,1,.3,1)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: 10,
-                      flexShrink: 0,
-                      transform: dragOverRoom === CREATE_NEW_ROOM_ID ? "scale(1.02)" : "scale(1)",
-                      boxShadow: dragOverRoom === CREATE_NEW_ROOM_ID
-                        ? "0 6px 28px rgba(166,124,61,0.25)"
-                        : "0 2px 12px rgba(80,50,10,0.06)",
-                    }}
-                  >
-                    <div style={{
-                      width: 36, height: 36, borderRadius: "50%",
-                      background: "rgba(166,124,61,0.15)",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}>
-                      <Icon d={IC.plus} size={18} color={B.gold} sw={2.2} />
-                    </div>
-                    <div style={{ textAlign: "left" }}>
-                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: B.gold }}>
-                        {dragOverRoom === CREATE_NEW_ROOM_ID ? "Release to create room" : "Drop to create new room"}
-                      </div>
-                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 2 }}>
-                        Room will include this property
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {rooms.length === 0 && !dragging ? (
+                {rooms.length === 0 ? (
                   <div style={{ padding: "36px 16px", textAlign: "center" }}>
                     <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(166,124,61,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
                       <Icon d={IC.home} size={18} color={B.gold} sw={1.5} />
@@ -849,36 +690,26 @@ export default function Dashboard() {
                     alreadyIn={draggedPropId ? (roomMeta[room.id]?.propIds || []).includes(draggedPropId) : false}
                     draggingActive={dragging}
                     setRef={el => { roomCardRefs.current[room.id] = el; }}
-                    onOpen={e => {
+                    onOpen={() => {
                       if (room.local) {
                         setShowDbBanner(true);
-                        alert("Database error. Check Firebase setup to enable rooms.");
+                        alert("Firebase Firestore is not configured. Check your Firebase project settings.");
                       } else {
-                        handleOpenRoom(e, room.room_code, room.name);
+                        nav(`/room/${room.room_code}`);
                       }
                     }}
                   />
                 ))}
               </div>
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
-
-      {/* ── Room transition overlay (simple fade) ──────────────────────────── */}
-      {roomTransition && (
-        <div
-          style={{
-            position: "fixed", inset: 0, zIndex: 500, pointerEvents: "none",
-            background: B.bg,
-            animation: "pageFadeOut 0.28s ease both",
-          }}
-        />
-      )}
 
       {/* ── Create Room Modal ─────────────────────────────────────────────── */}
       {showCreateModal && (
         <div
-          onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); } }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); } }}
           style={{
             position: "fixed", inset: 0, zIndex: 200,
             background: "rgba(16,10,4,0.55)", backdropFilter: "blur(6px)",
@@ -905,7 +736,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <button
-                onClick={() => { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); }}
+                onClick={() => { setShowCreateModal(false); setCreatedRoom(null); }}
                 style={{ marginTop: 4, width: 30, height: 30, borderRadius: "50%", background: "rgba(166,124,61,0.08)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
                 <Icon d={IC.x} size={13} color={B.muted} sw={1.8} />
@@ -916,25 +747,14 @@ export default function Dashboard() {
               {!createdRoom ? (
                 /* ── Step 1: Name the room ── */
                 <>
-                  {pendingCreatePropertyId ? (
-                    <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
-                      Name your room. It will include the property you dropped.
-                    </p>
-                  ) : (
-                    <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
-                      Give your room a name. You can invite roommates with the code once it's created.
-                    </p>
-                  )}
+                  <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
+                    Give your room a name. You can invite roommates with the code once it's created.
+                  </p>
                   <input
                     autoFocus
                     value={newRoomName}
                     onChange={e => setNewRoomName(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter" && newRoomName.trim()) {
-                        if (pendingCreatePropertyId) handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId);
-                        else handleCreateRoom(newRoomName);
-                      }
-                    }}
+                    onKeyDown={e => { if (e.key === "Enter" && newRoomName.trim()) handleCreateRoom(newRoomName); }}
                     placeholder="e.g. Irvine Summer Hunt"
                     maxLength={48}
                     style={{
@@ -949,7 +769,7 @@ export default function Dashboard() {
                     onBlur={e => { e.target.style.borderColor = B.border; }}
                   />
                   <button
-                    onClick={() => pendingCreatePropertyId ? handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId) : handleCreateRoom(newRoomName)}
+                    onClick={() => handleCreateRoom(newRoomName)}
                     disabled={busy || !newRoomName.trim()}
                     style={{
                       marginTop: 12, width: "100%", padding: "11px 0", borderRadius: 10,
@@ -1065,9 +885,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-        </>
-      )}
-      {!loading && <LoadingBar loading={false} />}
     </div>
   );
 }
@@ -1133,49 +950,18 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
       )}
 
       {/* Room info */}
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 7, gap: 8 }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          {/* Room name */}
-          <div style={{
-            fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 500,
-            color: B.ink, lineHeight: 1.2, marginBottom: 4,
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-          }}>
-            {room.name || "Unnamed Room"}
-          </div>
-          {/* Invite code row */}
-          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
-            <span style={{
-              fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fontWeight: 800,
-              color: B.gold, letterSpacing: 2.5, userSelect: "all",
-            }}>
-              {room.room_code}
-            </span>
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                navigator.clipboard.writeText(room.room_code);
-              }}
-              title="Copy code"
-              style={{
-                background: "none", border: "none", cursor: "pointer", padding: "1px 3px",
-                display: "flex", alignItems: "center", opacity: 0.5,
-              }}
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={B.gold} strokeWidth="2.2">
-                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
-              </svg>
-            </button>
-          </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 800, color: B.ink, letterSpacing: 2.5 }}>
+          {room.room_code}
         </div>
         <button
-          onClick={e => { e.stopPropagation(); onOpen(e); }}
+          onClick={e => { e.stopPropagation(); onOpen(); }}
           style={{
-            display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
-            padding: "5px 11px", borderRadius: 7,
+            display: "flex", alignItems: "center", gap: 4,
+            padding: "4px 10px", borderRadius: 7,
             background: B.goldBg, border: `1px solid ${B.border}`,
             fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, color: B.gold,
-            cursor: "pointer", marginTop: 2,
+            cursor: "pointer",
           }}
         >
           Open <Icon d="M9 18l6-6-6-6" size={10} color={B.gold} sw={2.2} />
@@ -1319,7 +1105,7 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
             onMouseEnter={() => setArrowHov("prev")}
             onMouseLeave={() => setArrowHov(null)}
             style={{
-              position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)",
+              position: "absolute", left: 9, top: "50%",
               width: 30, height: 30, borderRadius: "50%", border: "none",
               background: arrowHov === "prev" ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.78)",
               backdropFilter: "blur(8px)",
@@ -1342,7 +1128,7 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
             onMouseEnter={() => setArrowHov("next")}
             onMouseLeave={() => setArrowHov(null)}
             style={{
-              position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)",
+              position: "absolute", right: 9, top: "50%",
               width: 30, height: 30, borderRadius: "50%", border: "none",
               background: arrowHov === "next" ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.78)",
               backdropFilter: "blur(8px)",

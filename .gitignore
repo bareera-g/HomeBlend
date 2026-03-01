@@ -43,9 +43,9 @@ logs/
 *.log
 
 # ======================
-# Supabase
+# Firebase
 # ======================
-.supabase/
+.firebase/
 
 # ======================
 # Coverage / testing

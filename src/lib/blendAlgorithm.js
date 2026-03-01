@@ -1,7 +1,7 @@
 /**
  * HomeBlend — Blend Algorithm
  * Ported from the scrape branch's backend blend service.
- * Runs entirely client-side using our property data + Supabase votes.
+ * Runs entirely client-side using our property data + Firestore votes.
  */
 
 // ─── Feature extraction ──────────────────────────────────────────────────────

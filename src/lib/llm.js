@@ -1,18 +1,13 @@
 /**
- * HomeBlend — LLM utilities (Google Gemini via server proxy)
- * The API key is stored server-side as GEMINI_API_KEY in .env.local
+ * HomeBlend — LLM utilities (OpenAI via server proxy)
+ * The API key is stored server-side as OPENAI_API_KEY in .env
  * and never shipped to the browser.
  */
 
 export const isLLMReady = true;
 
-// #region agent log
-console.warn('[DBG-276317] llm.js:init',JSON.stringify({proxy:true,isLLMReady:true}));
-fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'llm.js:init',message:'LLM module init (proxy mode)',data:{proxy:true},timestamp:Date.now()})}).catch(()=>{});
-// #endregion
-
-async function callGemini(prompt, maxTokens = 512) {
-  const res = await fetch("/api/gemini", {
+async function callLLM(prompt, maxTokens = 512) {
+  const res = await fetch("/api/llm", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ prompt, maxTokens }),
@@ -22,17 +17,8 @@ async function callGemini(prompt, maxTokens = 512) {
   try { data = await res.json(); } catch { throw new Error("Invalid response from insights server"); }
 
   if (!res.ok) {
-    // #region agent log
-    console.warn('[DBG-276317] llm.js:callGemini-error',JSON.stringify({status:res.status,error:data?.error}));
-    fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'llm.js:callGemini-error',message:'Proxy returned error',data:{status:res.status,error:data?.error},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     throw new Error(data?.error || `Server error (${res.status})`);
   }
-
-  // #region agent log
-  console.warn('[DBG-276317] llm.js:callGemini-success',JSON.stringify({hasText:Boolean(data?.text),textLength:data?.text?.length}));
-  fetch('http://127.0.0.1:7523/ingest/06aa0d71-7bf1-4955-8863-93af5e151c67',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'276317'},body:JSON.stringify({sessionId:'276317',runId:'post-fix',hypothesisId:'verify',location:'llm.js:callGemini-success',message:'Proxy returned text',data:{hasText:Boolean(data?.text),textLength:data?.text?.length},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   return data.text;
 }
@@ -101,7 +87,7 @@ Respond ONLY with valid JSON (no markdown, no explanation) in this exact structu
   "topPick": "name of the property most likely to satisfy everyone, or empty string"
 }`;
 
-  const text = await callGemini(prompt, 800);
+  const text = await callLLM(prompt, 800);
   if (!text) return null;
   return extractJSON(text, null);
 }
@@ -160,7 +146,7 @@ Respond ONLY with valid JSON (no markdown, no explanation) in EXACTLY this struc
   }`).join(",\n  ")}
 }`;
 
-  const text = await callGemini(prompt, 1200);
+  const text = await callLLM(prompt, 1200);
   if (!text) return null;
   return extractJSON(text, null);
 }
