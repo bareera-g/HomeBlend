@@ -69,7 +69,7 @@ CREATE POLICY "room_props_select" ON room_properties FOR SELECT USING (auth.uid(
 CREATE POLICY "room_props_insert" ON room_properties FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
 CREATE POLICY "room_props_delete" ON room_properties FOR DELETE
   USING (auth.uid() = added_by OR
-    EXISTS (SELECT 1 FROM blends WHERE id = room_properties.blend_id AND created_by = auth.uid()));
+    EXISTS (SELECT 1 FROM blends b WHERE b.id = blend_id AND b.created_by = auth.uid()));
 
 -- ── 4. room_votes ─────────────────────────────────────────────────────────────
 -- Like / dislike votes on properties within a blend.
