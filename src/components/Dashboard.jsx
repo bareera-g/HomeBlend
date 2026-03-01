@@ -15,6 +15,7 @@ import { computeUniquePropertyImages } from "../lib/uniquePropertyImages.js";
 import MapPanel from "./MapPanel.jsx";
 import LoadingScreen from "./LoadingScreen.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
+import PropertyExpandModal from "./PropertyExpandModal.jsx";
 
 function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
@@ -71,11 +72,13 @@ export default function Dashboard() {
   const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
   const [highlightedPropertyId, setHighlightedPropertyId] = useState(null);     // map-click → scroll to card & pulse highlight
   const [showLoader, setShowLoader] = useState(true);   // stays until bar completes after loading done
+  const [expandedProperty, setExpandedProperty] = useState(null); // full-screen detail modal
 
   const CREATE_NEW_ROOM_ID = "__create_new__";
 
   // Refs for custom drag system
   const dragRef         = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
+  const listenersRef    = useRef({ move: null, up: null });  // track exact handler refs for cleanup
   const roomCardRefs    = useRef({});   // roomId → DOM node
   const createNewRoomRef = useRef(null);
   const ghostRef        = useRef(null);
@@ -295,9 +298,11 @@ export default function Dashboard() {
     setDragging(false);
     setDraggedPropId(null);
     setDragOverRoom(null);
-    window.removeEventListener("mousemove", handleMouseMove);
-    window.removeEventListener("mouseup", handleMouseUp);
-  }, []); // eslint-disable-line
+    // Remove the exact handler refs that were added (avoids stale-closure leak)
+    if (listenersRef.current.move) window.removeEventListener("mousemove", listenersRef.current.move);
+    if (listenersRef.current.up)   window.removeEventListener("mouseup",   listenersRef.current.up);
+    listenersRef.current = { move: null, up: null };
+  }, []);
 
   const handleMouseMove = useCallback((e) => {
     const dr = dragRef.current;
@@ -380,7 +385,15 @@ export default function Dashboard() {
 
   const handleMouseUp = useCallback(async (e) => {
     const dr = dragRef.current;
-    if (!dr.active || !dr.propId) { cleanupDrag(); return; }
+    if (!dr.active || !dr.propId) {
+      // No drag occurred → treat as click to expand property
+      if (dr.propId) {
+        const clicked = PROPERTIES.find(p => p.id === dr.propId);
+        if (clicked) setExpandedProperty(clicked);
+      }
+      cleanupDrag();
+      return;
+    }
 
     // Find which room or create-new zone was dropped on
     let droppedRoom = null;
@@ -441,7 +454,11 @@ export default function Dashboard() {
 
   const onCardMouseDown = useCallback((e, propId) => {
     if (e.button !== 0) return; // left button only
+    // Clean up any leaked listeners from a previous interaction
+    if (listenersRef.current.move) window.removeEventListener("mousemove", listenersRef.current.move);
+    if (listenersRef.current.up)   window.removeEventListener("mouseup",   listenersRef.current.up);
     dragRef.current = { active: false, propId, startX: e.clientX, startY: e.clientY, ghost: null };
+    listenersRef.current = { move: handleMouseMove, up: handleMouseUp };
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
   }, [handleMouseMove, handleMouseUp]);
@@ -1166,6 +1183,16 @@ export default function Dashboard() {
           onClose={() => setShowAddDrawerForRoomId(null)}
         />
       )}
+
+      {/* ── Full-screen expanded property modal ── */}
+      {expandedProperty && (
+        <PropertyExpandModal
+          property={expandedProperty}
+          saved={savedIds.includes(expandedProperty.id)}
+          onSave={e => toggleSave(expandedProperty.id, e)}
+          onClose={() => setExpandedProperty(null)}
+        />
+      )}
     </div>
   );
 }
@@ -1303,11 +1330,33 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
   const [imgIdx,    setImgIdx]    = useState(0);
   const [expanded,  setExpanded]  = useState(false);
   const [arrowHov,  setArrowHov]  = useState(null); // "prev" | "next"
-  const displayImages = useMemo(() => {
-    if (!primaryImageUrl) return property.images;
-    return [primaryImageUrl, ...property.images.filter(u => u !== primaryImageUrl)];
+  const [isVisible, setIsVisible] = useState(false);
+  const cardRef = useRef(null);
+
+  // Unique lead image + cap to 5 for perf
+  const images = useMemo(() => {
+    const base = primaryImageUrl
+      ? [primaryImageUrl, ...property.images.filter(u => u !== primaryImageUrl)]
+      : property.images;
+    return base.slice(0, 5);
   }, [property.images, primaryImageUrl]);
-  const totalImgs = displayImages.length;
+  const totalImgs = images.length;
+
+  // Track card visibility via IntersectionObserver
+  useEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([e]) => setIsVisible(e.isIntersecting), { threshold: 0.1 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  // Auto-advance gallery — pauses while hovered or offscreen
+  useEffect(() => {
+    if (totalImgs <= 1 || hovered || !isVisible) return;
+    const t = setInterval(() => setImgIdx(i => (i + 1) % totalImgs), 7000);
+    return () => clearInterval(t);
+  }, [hovered, totalImgs, isVisible]);
 
   function goTo(dir, e) {
     e.stopPropagation();
@@ -1322,6 +1371,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
 
   return (
     <div
+      ref={cardRef}
       onMouseDown={e => onMouseDown(e, property.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -1347,23 +1397,21 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
       {/* ── Photo Gallery ── */}
       <div style={{ height: IMG_H, flexShrink: 0, position: "relative", overflow: "hidden", background: "#E8DED2" }}>
 
-        {/* Slides */}
-        {displayImages.map((src, i) => (
-          <img
-            key={i}
-            src={src}
-            alt=""
-            draggable={false}
-            style={{
+        {/* Slides — only render current + neighbors for perf */}
+        {images.map((src, i) => {
+          const show = i === imgIdx || i === (imgIdx + 1) % totalImgs || i === (imgIdx - 1 + totalImgs) % totalImgs;
+          if (!show) return null;
+          return (
+            <img key={i} src={src} alt="" draggable={false} style={{
               position: "absolute", inset: 0, width: "100%", height: "100%",
               objectFit: "cover",
-              transition: "opacity 0.5s ease, transform 0.5s ease",
+              transition: "opacity 0.5s ease",
               opacity: i === imgIdx ? 1 : 0,
-              transform: i === imgIdx ? "scale(1)" : "scale(1.03)",
             }}
             onError={e => { e.target.style.display = "none"; }}
-          />
-        ))}
+            />
+          );
+        })}
 
         {/* Gradient scrims */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(12,5,2,0.6) 0%, transparent 52%)", pointerEvents: "none" }} />
@@ -1442,7 +1490,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
         {/* Dot indicators — bottom center-right */}
         {totalImgs > 1 && (
           <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 5, alignItems: "center" }}>
-            {displayImages.map((_, i) => (
+            {images.map((_, i) => (
               <div
                 key={i}
                 onMouseDown={e => e.stopPropagation()}
@@ -1497,10 +1545,10 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
         {/* Stats grid */}
         <div style={{ display: "flex", background: "rgba(166,124,61,0.05)", borderRadius: 8, overflow: "hidden", border: `1px solid rgba(166,124,61,0.1)` }}>
           {[
-            [property.beds,                 "Beds"],
-            [property.baths,               "Baths"],
-            [property.sqft?.toLocaleString(), "Sq Ft"],
-            [property.yearBuilt,            "Built"],
+            [property.beds,                                      "Beds"],
+            [property.baths,                                    "Baths"],
+            [property.sqft ? property.sqft.toLocaleString() : "—", "Sq Ft"],
+            [property.yearBuilt || "—",                          "Built"],
           ].map(([v, l], i, arr) => (
             <div key={l} style={{ flex: 1, textAlign: "center", padding: "7px 0", borderRight: i < arr.length - 1 ? `1px solid rgba(166,124,61,0.12)` : "none" }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: B.ink, lineHeight: 1 }}>{v}</div>
@@ -1575,9 +1623,9 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
         <div style={{ margin: "10px 14px 0" }}>
 
           {/* Photo strip */}
-          {displayImages.length > 1 && (
+          {images.length > 1 && (
             <div style={{ display: "flex", gap: 5, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
-              {displayImages.map((src, i) => (
+              {images.map((src, i) => (
                 <div key={i} style={{
                   height: 90, minWidth: i === 0 ? 160 : 120,
                   borderRadius: 9, flexShrink: 0,
@@ -1586,7 +1634,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
                   boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
                 }} />
               ))}
-              {displayImages.length === 2 && (
+              {images.length === 2 && (
                 <div style={{ height: 90, minWidth: 100, borderRadius: 9, flexShrink: 0, background: "rgba(166,124,61,0.06)", border: `1px dashed rgba(166,124,61,0.25)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                 </div>
@@ -1609,8 +1657,8 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {[
               ["home",    property.category],
-              ["sqft",    `${property.sqft?.toLocaleString()} sq ft`],
-              ["built",   `Built ${property.yearBuilt}`],
+              ["sqft",    property.sqft ? `${property.sqft.toLocaleString()} sq ft` : null],
+              ["built",   property.yearBuilt ? `Built ${property.yearBuilt}` : null],
               property.petFriendly && ["pet", "Pet friendly"],
             ].filter(Boolean).map(([icon, text]) => (
               <div key={text} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 6, background: "rgba(166,124,61,0.06)", border: `1px solid rgba(166,124,61,0.14)` }}>
@@ -1620,34 +1668,30 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
             ))}
           </div>
 
-          {/* External links */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-            {[
-              ["Zillow",          `https://www.zillow.com/homes/${encodeURIComponent(property.location)}_rb/`],
-              ["Apartments.com",  `https://www.apartments.com/irvine-ca/`],
-              ["Realtor.com",     `https://www.realtor.com/apartments/${encodeURIComponent(property.location.replace(", ", "_"))}`],
-            ].map(([site, href]) => (
-              <a key={site} href={href} target="_blank" rel="noopener noreferrer"
+          {/* View Listing link */}
+          {property.listingUrl && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+              <a href={property.listingUrl} target="_blank" rel="noopener noreferrer"
                 onMouseDown={e => e.stopPropagation()}
                 onClick={e => e.stopPropagation()}
                 style={{
                   flex: 1, textAlign: "center",
                   padding: "7px 0", borderRadius: 7,
-                  border: `1px solid ${B.border}`,
-                  background: "rgba(255,255,255,0.7)",
+                  border: `1px solid ${B.gold}`,
+                  background: "rgba(166,124,61,0.08)",
                   fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600,
-                  color: B.muted, textDecoration: "none",
+                  color: B.gold, textDecoration: "none",
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                  transition: "border-color 0.15s, color 0.15s",
+                  transition: "border-color 0.15s, color 0.15s, background 0.15s",
                 }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = B.gold; e.currentTarget.style.color = B.gold; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = B.border; e.currentTarget.style.color = B.muted; }}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(166,124,61,0.14)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = "rgba(166,124,61,0.08)"; }}
               >
-                {site}
+                View Listing
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
               </a>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

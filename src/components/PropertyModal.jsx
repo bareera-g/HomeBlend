@@ -56,7 +56,7 @@ export default function PropertyModal({ property, myVote, blendScore, blendReaso
           <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: B.gold }}>{property.price}</span>
         </div>
         <div style={{ display: "flex", gap: 0, marginTop: 12, background: "rgba(166,124,61,0.06)", borderRadius: 8, padding: "8px 0" }}>
-          {[["Bed", property.beds], ["Bath", property.baths], ["Sqft", property.sqft.toLocaleString()], ["Built", property.yearBuilt]].map(([l, v], i, arr) => (
+          {[["Bed", property.beds], ["Bath", property.baths], ["Sqft", property.sqft ? property.sqft.toLocaleString() : "—"], ["Built", property.yearBuilt || "—"]].map(([l, v], i, arr) => (
             <div key={l} style={{ flex: 1, textAlign: "center", borderRight: i < arr.length - 1 ? `1px solid ${B.border}` : "none" }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700, color: B.ink }}>{v}</div>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, letterSpacing: 0.6, textTransform: "uppercase", color: B.muted }}>{l}</div>

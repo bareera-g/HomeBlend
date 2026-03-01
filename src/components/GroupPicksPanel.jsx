@@ -2,10 +2,9 @@ import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { B } from "../Brand.jsx";
 import { generateGroupPicksWithOverview, isLLMReady } from "../lib/llm.js";
 
-/** Apartments.com search URL for a property (Irvine area) */
-function apartmentsUrl(property) {
-  const q = [property.title, property.location || "Irvine CA"].filter(Boolean).join(" ");
-  return `https://www.apartments.com/search/?search=${encodeURIComponent(q)}`;
+/** Returns the real listing URL when available */
+function listingLink(property) {
+  return property.listingUrl || null;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -265,10 +264,12 @@ function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
                 <span key={t} style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(166,124,61,0.1)", fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 600, color: B.gold }}>{t}</span>
               ))}
             </div>
-            <a href={apartmentsUrl(property)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 700, color: B.gold, textDecoration: "none" }}>
-              View on Apartments.com
-              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-            </a>
+            {listingLink(property) && (
+              <a href={listingLink(property)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 700, color: B.gold, textDecoration: "none" }}>
+                View Listing
+                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            )}
           </div>
         </div>
       </div>

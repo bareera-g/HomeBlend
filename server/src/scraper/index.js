@@ -20,6 +20,10 @@
  *     npm run scrape -- --source redfin
  *     npm run scrape -- --source both
  *
+ *   Apartments.com scrape (Irvine / Orange County):
+ *     npm run scrape -- --source apartments
+ *     npm run scrape -- --source apartments --limit 15 --enrich
+ *
  *   Common options:
  *     --cities "Austin,Miami"   Specific cities (comma-separated)
  *     --limit 15                Listings per city (default: 10)
@@ -45,8 +49,9 @@ function parseArgs() {
     cities: null,
     limit: 10,
     enrich: false,
-    source: 'both',      // scrape mode: "zillow" | "redfin" | "browser" | "both"
+    source: 'both',      // scrape mode: "zillow" | "redfin" | "browser" | "both" | "apartments"
     output: path.resolve(__dirname, '../data/listings.json'),
+    frontend: false,     // also write to src/data/properties.js
     dryRun: false,
     keepOld: false,
     seed: null,
@@ -86,6 +91,9 @@ function parseArgs() {
       case '--seed':
         opts.seed = parseInt(args[++i], 10);
         break;
+      case '--frontend':
+        opts.frontend = true;
+        break;
       case '--help':
         printHelp();
         process.exit(0);
@@ -107,7 +115,7 @@ MODES:
 
   --generate              Generate realistic market data (instant, default)
   --import <file.csv>     Import a Redfin CSV download
-  --source <src>          Live scrape: browser | zillow | redfin | both
+  --source <src>          Live scrape: browser | zillow | redfin | both | apartments
 
 OPTIONS:
 
@@ -133,6 +141,9 @@ EXAMPLES:
 
   # Live scrape with Chrome (must be installed)
   npm run scrape -- --source browser --cities "Austin" --limit 5
+
+  # Scrape Apartments.com for Irvine / Orange County
+  npm run scrape:apartments
 
 AVAILABLE CITIES:
   ${CITIES.map((c) => c.city).join(', ')}
@@ -294,6 +305,67 @@ async function runScrape(opts) {
   return allListings;
 }
 
+/* ── Apartments.com mode ──────────────────────────────────── */
+
+async function runApartments(opts) {
+  const { scrapeIrvineOC, IRVINE_AREAS } = require('./rentcom');
+
+  console.log('\nMode: SCRAPE (Rent.com – Irvine / Orange County)');
+
+  let areas = IRVINE_AREAS;
+  if (opts.cities) {
+    const cityNames = opts.cities.map((c) => c.toLowerCase());
+    areas = IRVINE_AREAS.filter((a) => cityNames.includes(a.label.toLowerCase()));
+    if (areas.length === 0) {
+      console.log(`No matching areas. Available: ${IRVINE_AREAS.map((a) => a.label).join(', ')}`);
+      console.log('Falling back to all Irvine/OC areas.');
+      areas = IRVINE_AREAS;
+    }
+  }
+
+  console.log(`Areas:  ${areas.map((a) => a.label).join(', ')}`);
+  console.log(`Limit:  ${opts.limit} per area`);
+  console.log(`Enrich: ${opts.enrich}`);
+
+  const listings = await scrapeIrvineOC({
+    areas,
+    limit: opts.limit,
+    enrich: opts.enrich,
+  });
+
+  return listings;
+}
+
+/* ── Frontend properties.js writer ─────────────────────────── */
+
+function writeFrontendProperties(listings) {
+  const frontendPath = path.resolve(__dirname, '../../../src/data/properties.js');
+
+  let output = 'export const PROPERTIES = [\n';
+  for (const l of listings) {
+    const escape = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
+    const imgs = (l.images || []).map((u) => `      "${u}"`).join(',\n');
+    const tags = (l.tags || []).map((t) => `"${escape(t)}"`).join(', ');
+    output += '  {\n';
+    output += `    id: ${l.id}, title: "${escape(l.title)}", location: "${escape(l.location)}",\n`;
+    output += `    price: "${escape(l.price)}", priceNum: ${l.priceNum || 0}, category: "${escape(l.category)}",\n`;
+    output += `    beds: ${l.beds || 1}, baths: ${l.baths || 1}, sqft: ${l.sqft || 0}, yearBuilt: ${l.yearBuilt || 'null'},\n`;
+    output += `    tags: [${tags}],\n`;
+    output += `    petFriendly: ${!!l.petFriendly}, parking: ${l.parking ? `"${escape(l.parking)}"` : 'null'}, laundry: ${l.laundry ? `"${escape(l.laundry)}"` : 'null'},\n`;
+    output += `    lng: ${l.lng || -117.78}, lat: ${l.lat || 33.68},\n`;
+    output += `    images: [\n${imgs},\n    ],\n`;
+    output += `    aiOverview: "${escape(l.aiOverview)}",\n`;
+    if (l.listingUrl) output += `    listingUrl: "${escape(l.listingUrl)}",\n`;
+    output += '  },\n';
+  }
+  output += '];\n';
+
+  const dir = path.dirname(frontendPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(frontendPath, output);
+  console.log(`✓ Written ${listings.length} listings to ${frontendPath}\n`);
+}
+
 /* ── Main ─────────────────────────────────────────────────── */
 
 async function main() {
@@ -322,7 +394,11 @@ async function main() {
       newListings = await runImport(opts);
       break;
     case 'scrape':
-      newListings = await runScrape(opts);
+      if (opts.source === 'apartments') {
+        newListings = await runApartments(opts);
+      } else {
+        newListings = await runScrape(opts);
+      }
       break;
     default:
       console.error(`Unknown mode: ${opts.mode}`);
@@ -333,6 +409,7 @@ async function main() {
 
   // Summary
   console.log('══════════════════════════════════════════════');
+  console.log(`  Mode:            ${opts.mode}`);
   console.log(`  New listings:    ${newListings.length}`);
   if (existingListings.length > 0) {
     console.log(`  Existing kept:   ${existingListings.length}`);
@@ -342,7 +419,8 @@ async function main() {
   // City breakdown
   const byCity = {};
   for (const l of allListings) {
-    byCity[l.city] = (byCity[l.city] || 0) + 1;
+    const cityLabel = l.city || l.location || 'Unknown';
+    byCity[cityLabel] = (byCity[cityLabel] || 0) + 1;
   }
   console.log(`  Cities:          ${Object.keys(byCity).length}`);
   for (const [city, count] of Object.entries(byCity).sort((a, b) => b[1] - a[1])) {
@@ -372,9 +450,14 @@ async function main() {
       mode: opts.mode,
       newListings: newListings.length,
       grandTotal: allListings.length,
-      citiesScraped: [...new Set(newListings.map((l) => l.city))],
+      citiesScraped: [...new Set(newListings.map((l) => l.city || l.location))],
       schema: Object.keys(newListings[0] || {}),
     }, null, 2));
+
+    // Optionally write frontend properties.js
+    if (opts.frontend) {
+      writeFrontendProperties(allListings);
+    }
   } else {
     console.log('(dry run — nothing written)\n');
   }

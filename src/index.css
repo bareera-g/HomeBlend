@@ -75,6 +75,12 @@ input[type="range"].price-slider::-moz-range-thumb:hover {
 }
 
 /* ── Page transition (simple fade) ── */
+@keyframes modalScaleUp {
+  from { transform: scale(0.88); opacity: 0; }
+  60%  { transform: scale(1.015); }
+  to   { transform: scale(1); opacity: 1; }
+}
+
 @keyframes pageFadeOut {
   from { opacity: 0; }
   to   { opacity: 1; }

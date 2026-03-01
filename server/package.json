@@ -9,6 +9,8 @@
     "scrape": "node src/scraper/index.js",
     "scrape:zillow": "node src/scraper/index.js --source zillow",
     "scrape:redfin": "node src/scraper/index.js --source redfin",
+    "scrape:apartments": "node src/scraper/index.js --source apartments --enrich",
+    "scrape:apartments:frontend": "node src/scraper/index.js --source apartments --enrich --frontend",
     "scrape:enrich": "node src/scraper/index.js --enrich",
     "scrape:preview": "node src/scraper/index.js --dry-run",
     "test": "echo \"Error: no test specified\" && exit 1"
