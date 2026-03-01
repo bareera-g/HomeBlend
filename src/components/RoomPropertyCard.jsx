@@ -175,7 +175,7 @@ export default function RoomPropertyCard({
               {votes.slice(0, 4).map((v, i) => {
                 const m = members.find(mb => mb.user_id === v.user_id || mb.auth_user_id === v.user_id);
                 return (
-                  <div key={i} title={`${m?.display_name || "?"}: ${v.vote === 1 ? "👍" : "👎"}`} style={{
+                  <div key={i} title={`${m?.display_name || "?"}: ${v.vote === 1 ? "liked" : "passed"}`} style={{
                     width: 20, height: 20, borderRadius: "50%",
                     background: m?.avatar_color || B.muted,
                     border: `2px solid ${v.vote === 1 ? "#4A7C59" : "#8B3A3A"}`,

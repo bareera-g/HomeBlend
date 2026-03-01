@@ -782,9 +782,9 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
   }
 
   const amenities = [
-    property.parking    && { icon: "🚗", label: property.parking },
-    property.laundry    && { icon: "🧺", label: property.laundry },
-    property.petFriendly ? { icon: "🐾", label: "Pets OK" } : null,
+    property.parking     && { icon: "parking", label: property.parking },
+    property.laundry     && { icon: "laundry", label: property.laundry },
+    property.petFriendly && { icon: "pet",     label: "Pets OK" },
   ].filter(Boolean);
 
   const perPerson = property.priceNum
@@ -991,14 +991,14 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
             {amenities.map(a => (
               <span key={a.label} style={{
-                display: "flex", alignItems: "center", gap: 4,
+                display: "flex", alignItems: "center", gap: 5,
                 padding: "3px 9px", borderRadius: 6,
                 background: "rgba(166,124,61,0.06)",
                 border: `1px solid rgba(166,124,61,0.16)`,
                 fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, fontWeight: 500,
                 whiteSpace: "nowrap",
               }}>
-                <span style={{ fontSize: 11 }}>{a.icon}</span> {a.label}
+                <AmenityIcon type={a.icon} size={11} /> {a.label}
               </span>
             ))}
           </div>
@@ -1085,13 +1085,13 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
           {/* Quick facts */}
           <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
             {[
-              ["🏠", property.category],
-              ["📐", `${property.sqft?.toLocaleString()} sq ft`],
-              ["🏗️", `Built ${property.yearBuilt}`],
-              property.petFriendly && ["🐾", "Pet friendly"],
+              ["home",    property.category],
+              ["sqft",    `${property.sqft?.toLocaleString()} sq ft`],
+              ["built",   `Built ${property.yearBuilt}`],
+              property.petFriendly && ["pet", "Pet friendly"],
             ].filter(Boolean).map(([icon, text]) => (
-              <div key={text} style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 9px", borderRadius: 6, background: "rgba(166,124,61,0.06)", border: `1px solid rgba(166,124,61,0.14)` }}>
-                <span style={{ fontSize: 11 }}>{icon}</span>
+              <div key={text} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 6, background: "rgba(166,124,61,0.06)", border: `1px solid rgba(166,124,61,0.14)` }}>
+                <QuickFactIcon type={icon} />
                 <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, fontWeight: 500 }}>{text}</span>
               </div>
             ))}
@@ -1131,6 +1131,56 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
       <div style={{ height: 14, flexShrink: 0 }} />
     </div>
   );
+}
+
+/* ── Amenity Icon (SVG, no emoji) ──────────────────────────────────────────── */
+function AmenityIcon({ type, size = 12 }) {
+  const s = { width: size, height: size, flexShrink: 0 };
+  if (type === "pet") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="4.5" cy="9.5" r="2"/><circle cx="9" cy="5" r="2"/>
+      <circle cx="15" cy="5" r="2"/><circle cx="19.5" cy="9.5" r="2"/>
+      <path d="M12 17.5c-3.5 0-7-2-7-5s3-4 7-4 7 1 7 4-3.5 5-7 5z"/>
+    </svg>
+  );
+  if (type === "parking") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="3"/>
+      <path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>
+    </svg>
+  );
+  if (type === "laundry") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="18" rx="2"/>
+      <circle cx="12" cy="13" r="4"/>
+      <line x1="6" y1="7" x2="6.01" y2="7"/>
+      <line x1="9" y1="7" x2="9.01" y2="7"/>
+    </svg>
+  );
+  return null;
+}
+
+/* ── Quick Fact Icon (SVG, no emoji) ───────────────────────────────────────── */
+function QuickFactIcon({ type }) {
+  const s = { width: 11, height: 11, flexShrink: 0 };
+  if (type === "home") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+      <polyline points="9 22 9 12 15 12 15 22"/>
+    </svg>
+  );
+  if (type === "sqft") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+    </svg>
+  );
+  if (type === "built") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+  );
+  if (type === "pet") return <AmenityIcon type="pet" size={11} />;
+  return null;
 }
 
 /* ── Drag Dots SVG ─────────────────────────────────────────────────────────── */

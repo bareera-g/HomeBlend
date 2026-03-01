@@ -403,7 +403,7 @@ export default function RoomView() {
           }}>
             {[
               ["map",   IC.map,   "Map"],
-              ["blend", IC.spark, blendData ? "Blend ✓" : "Blend"],
+              ["blend", IC.spark, blendData ? "Blend · done" : "Blend"],
             ].map(([tab, icon, label]) => (
               <button
                 key={tab}

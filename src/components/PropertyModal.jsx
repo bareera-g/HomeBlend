@@ -1,6 +1,31 @@
 import { useState } from "react";
 import { B, Icon, IC } from "../Brand.jsx";
 
+function AmenityIcon({ type }) {
+  const s = { width: 16, height: 16, flexShrink: 0 };
+  if (type === "pet") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="4.5" cy="9.5" r="2"/><circle cx="9" cy="5" r="2"/><circle cx="15" cy="5" r="2"/><circle cx="19.5" cy="9.5" r="2"/>
+      <path d="M12 17.5c-3.5 0-7-2-7-5s3-4 7-4 7 1 7 4-3.5 5-7 5z"/>
+    </svg>
+  );
+  if (type === "parking") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="3"/>
+      <path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>
+    </svg>
+  );
+  if (type === "laundry") return (
+    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="3" width="20" height="18" rx="2"/>
+      <circle cx="12" cy="13" r="4"/>
+      <line x1="6" y1="7" x2="6.01" y2="7"/>
+      <line x1="9" y1="7" x2="9.01" y2="7"/>
+    </svg>
+  );
+  return null;
+}
+
 export default function PropertyModal({ property, myVote, blendScore, blendReason, onLike, onPass, onClose }) {
   const [imgIdx, setImgIdx] = useState(0);
   const [activeTab, setActiveTab] = useState("details");
@@ -27,7 +52,7 @@ export default function PropertyModal({ property, myVote, blendScore, blendReaso
       <div style={{ padding: "16px 18px 10px", borderBottom: `1px solid ${B.border}`, flexShrink: 0 }}>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 500, color: B.ink, marginBottom: 2 }}>{property.title}</div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted }}>📍 {property.location}</span>
+          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted }}>{property.location}</span>
           <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, color: B.gold }}>{property.price}</span>
         </div>
         <div style={{ display: "flex", gap: 0, marginTop: 12, background: "rgba(166,124,61,0.06)", borderRadius: 8, padding: "8px 0" }}>
@@ -55,9 +80,14 @@ export default function PropertyModal({ property, myVote, blendScore, blendReaso
               {property.tags.map(t => <span key={t} style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 500, padding: "3px 9px", borderRadius: 5, border: `1px solid ${B.border}`, background: "rgba(166,124,61,0.05)", color: B.muted }}>{t}</span>)}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {[property.petFriendly && ["🐾","Pet Friendly"], property.parking && ["🚗", property.parking], property.laundry && ["🧺", property.laundry]].filter(Boolean).map(([icon, label]) => (
+              {[
+                property.petFriendly && ["pet",     "Pet Friendly"],
+                property.parking     && ["parking",  property.parking],
+                property.laundry     && ["laundry",  property.laundry],
+              ].filter(Boolean).map(([key, label]) => (
                 <div key={label} style={{ display: "flex", alignItems: "center", gap: 10, fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.inkSoft }}>
-                  <span style={{ fontSize: 16 }}>{icon}</span>{label}
+                  <AmenityIcon type={key} />
+                  {label}
                 </div>
               ))}
             </div>
