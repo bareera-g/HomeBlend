@@ -15,7 +15,7 @@ import MapPanel from "./MapPanel.jsx";
 
 function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
-const IMG_H = 192;
+const IMG_H = 230;
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
@@ -383,7 +383,7 @@ export default function Dashboard() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
 
         {/* ── Properties panel ──────────────────────────────────────────────── */}
-        <div style={{ width: 262, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
+        <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
           {/* Sub-header: category chips + count */}
           <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
@@ -763,9 +763,23 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
 
 /* ── Property Card ─────────────────────────────────────────────────────────── */
 function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
-  const [hovered,  setHovered]  = useState(false);
-  const [imgIdx,   setImgIdx]   = useState(0);
-  const [expanded, setExpanded] = useState(false);
+  const [hovered,   setHovered]   = useState(false);
+  const [imgIdx,    setImgIdx]    = useState(0);
+  const [expanded,  setExpanded]  = useState(false);
+  const [arrowHov,  setArrowHov]  = useState(null); // "prev" | "next"
+  const totalImgs = property.images.length;
+
+  // Auto-advance gallery — pauses while hovered
+  useEffect(() => {
+    if (totalImgs <= 1 || hovered) return;
+    const t = setInterval(() => setImgIdx(i => (i + 1) % totalImgs), 3800);
+    return () => clearInterval(t);
+  }, [hovered, totalImgs]);
+
+  function goTo(dir, e) {
+    e.stopPropagation();
+    setImgIdx(i => (i + dir + totalImgs) % totalImgs);
+  }
 
   const amenities = [
     property.parking    && { icon: "🚗", label: property.parking },
@@ -799,26 +813,27 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
         userSelect: "none",
       }}
     >
-      {/* ── Photo ── */}
+      {/* ── Photo Gallery ── */}
       <div style={{ height: IMG_H, flexShrink: 0, position: "relative", overflow: "hidden", background: "#E8DED2" }}>
+
+        {/* Slides */}
         {property.images.map((src, i) => (
           <img key={i} src={src} alt="" draggable={false} style={{
             position: "absolute", inset: 0, width: "100%", height: "100%",
-            objectFit: "cover", transition: "opacity 0.35s", opacity: i === imgIdx ? 1 : 0,
+            objectFit: "cover",
+            transition: "opacity 0.5s ease, transform 0.5s ease",
+            opacity: i === imgIdx ? 1 : 0,
+            transform: i === imgIdx ? "scale(1)" : "scale(1.03)",
           }} />
         ))}
 
-        {/* Scrim gradients */}
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(12,5,2,0.55) 0%, transparent 50%)", pointerEvents: "none" }} />
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(12,5,2,0.38) 0%, transparent 40%)", pointerEvents: "none" }} />
+        {/* Gradient scrims */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(12,5,2,0.6) 0%, transparent 52%)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(12,5,2,0.4) 0%, transparent 42%)", pointerEvents: "none" }} />
 
-        {/* Drag grip banner */}
+        {/* Drag grip top-left */}
         {hovered && !isDragging && (
-          <div style={{
-            position: "absolute", top: 0, left: 0, right: 0,
-            padding: "10px 13px", display: "flex", alignItems: "center", gap: 6,
-            animation: "fadeIn 0.14s ease",
-          }}>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "10px 13px", display: "flex", alignItems: "center", gap: 6, animation: "fadeIn 0.14s ease" }}>
             <DragDots />
             <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.88)", letterSpacing: 1.2, textTransform: "uppercase" }}>
               Hold &amp; drag to room
@@ -835,9 +850,55 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
           letterSpacing: 1.5, textTransform: "uppercase", color: "rgba(255,255,255,0.92)",
         }}>{property.category}</div>
 
-        {/* Per-person price — bottom left */}
-        <div style={{ position: "absolute", bottom: 10, left: 11 }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, fontWeight: 500, color: "#fff", lineHeight: 1 }}>{property.price}</div>
+        {/* ← Prev arrow */}
+        {totalImgs > 1 && hovered && (
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => goTo(-1, e)}
+            onMouseEnter={() => setArrowHov("prev")}
+            onMouseLeave={() => setArrowHov(null)}
+            style={{
+              position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)",
+              width: 30, height: 30, borderRadius: "50%", border: "none",
+              background: arrowHov === "prev" ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.78)",
+              backdropFilter: "blur(8px)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.22)",
+              transition: "background 0.15s, transform 0.15s",
+              transform: `translateY(-50%) scale(${arrowHov === "prev" ? 1.12 : 1})`,
+              animation: "fadeIn 0.15s ease",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2C1A0E" strokeWidth="2.5" strokeLinecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+          </button>
+        )}
+
+        {/* → Next arrow */}
+        {totalImgs > 1 && hovered && (
+          <button
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => goTo(1, e)}
+            onMouseEnter={() => setArrowHov("next")}
+            onMouseLeave={() => setArrowHov(null)}
+            style={{
+              position: "absolute", right: 9, top: "50%", transform: "translateY(-50%)",
+              width: 30, height: 30, borderRadius: "50%", border: "none",
+              background: arrowHov === "next" ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.78)",
+              backdropFilter: "blur(8px)",
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.22)",
+              transition: "background 0.15s, transform 0.15s",
+              transform: `translateY(-50%) scale(${arrowHov === "next" ? 1.12 : 1})`,
+              animation: "fadeIn 0.15s ease",
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2C1A0E" strokeWidth="2.5" strokeLinecap="round"><path d="M9 18l6-6-6-6"/></svg>
+          </button>
+        )}
+
+        {/* Price — bottom left */}
+        <div style={{ position: "absolute", bottom: 10, left: 12 }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 500, color: "#fff", lineHeight: 1 }}>{property.price}</div>
           {perPerson && (
             <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: 1 }}>
               ≈ {perPerson} split 3 ways
@@ -845,17 +906,34 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
           )}
         </div>
 
-        {/* Photo dots */}
-        {property.images.length > 1 && (
-          <div style={{ position: "absolute", bottom: 13, right: 46, display: "flex", gap: 3 }}>
+        {/* Dot indicators — bottom center-right */}
+        {totalImgs > 1 && (
+          <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 5, alignItems: "center" }}>
             {property.images.map((_, i) => (
-              <div key={i}
+              <div
+                key={i}
                 onMouseDown={e => e.stopPropagation()}
-                onClick={() => setImgIdx(i)}
-                style={{ width: i === imgIdx ? 14 : 4, height: 4, borderRadius: 2, background: i === imgIdx ? "#fff" : "rgba(255,255,255,0.45)", cursor: "pointer", transition: "width 0.2s" }}
+                onClick={e => { e.stopPropagation(); setImgIdx(i); }}
+                style={{
+                  width: i === imgIdx ? 18 : 5, height: 5, borderRadius: 3,
+                  background: i === imgIdx ? "#fff" : "rgba(255,255,255,0.48)",
+                  cursor: "pointer",
+                  transition: "width 0.25s ease, background 0.2s",
+                  boxShadow: i === imgIdx ? "0 0 6px rgba(255,255,255,0.5)" : "none",
+                }}
               />
             ))}
           </div>
+        )}
+
+        {/* Auto-play indicator — tiny pulse when auto-sliding */}
+        {totalImgs > 1 && !hovered && (
+          <div style={{
+            position: "absolute", bottom: 12, right: 46,
+            width: 5, height: 5, borderRadius: "50%",
+            background: "rgba(255,255,255,0.5)",
+            animation: "pulse 2s ease infinite",
+          }} />
         )}
 
         {/* Save heart */}
@@ -865,16 +943,16 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
           title={saved ? "Unsave" : "Save"}
           style={{
             position: "absolute", bottom: 9, right: 9,
-            width: 32, height: 32, borderRadius: "50%", border: "none",
+            width: 34, height: 34, borderRadius: "50%", border: "none",
             background: saved ? B.gold : "rgba(255,255,255,0.9)",
             backdropFilter: "blur(8px)",
             cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
             boxShadow: "0 2px 12px rgba(0,0,0,0.2)",
             transition: "background 0.2s, transform 0.15s",
-            transform: hovered ? "scale(1.1)" : "scale(1)",
+            transform: hovered ? "scale(1.12)" : "scale(1)",
           }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24"
+          <svg width="14" height="14" viewBox="0 0 24 24"
             fill={saved ? "#fff" : "none"} stroke={saved ? "#fff" : B.ink}
             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
@@ -885,10 +963,10 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
       {/* ── Info ── */}
       <div style={{ padding: "13px 14px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 500, color: B.ink, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 500, color: B.ink, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {property.title}
           </div>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 2 }}>
+          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.muted, marginTop: 3 }}>
             {property.location}
           </div>
         </div>
