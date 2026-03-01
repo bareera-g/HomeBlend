@@ -124,10 +124,19 @@ export default function RoomView() {
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleAddProperty = useCallback(async (propertyId) => {
     if (!room) return;
-    await addPropertyToRoom(room.id, propertyId, user.id);
-    setRoomPropIds(prev => prev.includes(propertyId) ? prev : [...prev, propertyId]);
-    setRoomPropMeta(prev => prev.find(r => r.property_id === propertyId)
-      ? prev : [...prev, { property_id: propertyId, added_by: user.id }]);
+    const pid = Number(propertyId);
+    // Optimistic update first — instant UI
+    setRoomPropIds(prev => prev.includes(pid) ? prev : [...prev, pid]);
+    setRoomPropMeta(prev => prev.find(r => r.property_id === pid)
+      ? prev : [...prev, { property_id: pid, added_by: user.id }]);
+    try {
+      await addPropertyToRoom(room.id, pid, user.id);
+    } catch (err) {
+      console.error("[HomeBlend] Failed to save property to room:", err);
+      // Rollback optimistic update
+      setRoomPropIds(prev => prev.filter(id => id !== pid));
+      setRoomPropMeta(prev => prev.filter(r => r.property_id !== pid));
+    }
   }, [room, user]);
 
   const handleRemoveProperty = useCallback(async (propertyId) => {

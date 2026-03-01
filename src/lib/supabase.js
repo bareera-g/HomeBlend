@@ -243,15 +243,17 @@ export async function fetchMembers(blendId) {
 // ── Room Properties ───────────────────────────────────────────────────────────
 export async function addPropertyToRoom(blendId, propertyId, userId) {
   guard();
-  return safe(async () => {
-    // Check first to avoid duplicate error (table has UNIQUE constraint)
-    const { data: existing } = await supabase.from("room_properties")
-      .select("id").eq("blend_id", blendId).eq("property_id", propertyId).maybeSingle();
-    if (existing) return;
-    const { error } = await supabase.from("room_properties")
-      .insert({ blend_id: blendId, property_id: propertyId, added_by: userId });
-    if (error) ignoreDuplicate(error);
-  }, undefined);
+  // Use upsert so duplicate rows are silently ignored (no separate SELECT needed)
+  const { error } = await supabase.from("room_properties").upsert(
+    { blend_id: blendId, property_id: Number(propertyId), added_by: userId },
+    { onConflict: "blend_id,property_id" }
+  );
+  if (error) {
+    // 23505 = unique violation (already exists) — safe to ignore
+    if (error.code === "23505") return;
+    console.error("[HomeBlend] addPropertyToRoom failed:", error);
+    throw error;
+  }
 }
 
 export async function removePropertyFromRoom(blendId, propertyId) {
@@ -264,9 +266,11 @@ export async function removePropertyFromRoom(blendId, propertyId) {
 export async function fetchRoomProperties(blendId) {
   guard();
   return safe(async () => {
-    const { data } = await supabase.from("room_properties")
+    const { data, error } = await supabase.from("room_properties")
       .select("*").eq("blend_id", blendId).order("added_at");
-    return (data || []).map(r => ({ ...r, room_id: blendId }));
+    if (error) throw error;
+    // Ensure property_id is always a JS number (not string) so includes() works
+    return (data || []).map(r => ({ ...r, property_id: Number(r.property_id), room_id: blendId }));
   }, []);
 }
 
@@ -276,24 +280,21 @@ export async function fetchRoomProperties(blendId) {
 
 export async function recordVote(blendId, userId, propertyId, vote) {
   guard();
-  return safe(async () => {
-    if (vote === null) {
-      await supabase.from("room_votes").delete()
-        .eq("blend_id", blendId).eq("user_id", userId).eq("property_id", propertyId);
-      return;
-    }
-    const voteText = (vote === 1 || vote === "like") ? "like" : "dislike";
-    // Update if exists, insert if not (table has UNIQUE constraint)
-    const { data: existing } = await supabase.from("room_votes").select("id")
-      .eq("blend_id", blendId).eq("user_id", userId).eq("property_id", propertyId).maybeSingle();
-    if (existing) {
-      await supabase.from("room_votes").update({ vote: voteText }).eq("id", existing.id);
-    } else {
-      const { error } = await supabase.from("room_votes")
-        .insert({ blend_id: blendId, user_id: userId, property_id: propertyId, vote: voteText });
-      if (error) ignoreDuplicate(error);
-    }
-  }, undefined);
+  const pid = Number(propertyId);
+  if (vote === null) {
+    await supabase.from("room_votes").delete()
+      .eq("blend_id", blendId).eq("user_id", userId).eq("property_id", pid);
+    return;
+  }
+  const voteText = (vote === 1 || vote === "like") ? "like" : "dislike";
+  const { error } = await supabase.from("room_votes").upsert(
+    { blend_id: blendId, user_id: userId, property_id: pid, vote: voteText },
+    { onConflict: "blend_id,user_id,property_id" }
+  );
+  if (error) {
+    console.error("[HomeBlend] recordVote failed:", error);
+    throw error;
+  }
 }
 
 export async function fetchVotes(blendId) {
