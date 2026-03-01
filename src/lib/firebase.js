@@ -63,7 +63,7 @@ export function randomAvatarColor() {
 
 /** Normalize display name to a stable userId (lowercase, spaces → underscores) */
 export function normalizeUserId(name) {
-  return String(name || "").trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "") || "anonymous";
+  return String(name || "").trim().toLowerCase().replaceAll(/\s+/g, "_").replaceAll(/[^a-z0-9_]/g, "") || "anonymous";
 }
 
 function guard() {
@@ -148,7 +148,7 @@ export async function unsaveProperty(userId, propertyId) {
   const ref = doc(db, "saved_properties", userId);
   const snap = await getDoc(ref);
   if (!snap.exists()) return;
-  const props = { ...(snap.data().properties || {}) };
+  const props = { ...snap.data().properties };
   delete props[propertyId];
   if (Object.keys(props).length === 0) await deleteDoc(ref);
   else await setDoc(ref, { properties: props });
@@ -163,7 +163,7 @@ export async function createRoom(name, userId, displayName, avatarColor) {
 
   const userRoomsRef = doc(db, "user_rooms", userId);
   const urSnap = await getDoc(userRoomsRef);
-  const rooms = urSnap.exists() ? { ...(urSnap.data().rooms || {}), [roomId]: Date.now() } : { [roomId]: Date.now() };
+  const rooms = urSnap.exists() ? { ...urSnap.data().rooms, [roomId]: Date.now() } : { [roomId]: Date.now() };
 
   const batch = writeBatch(db);
   batch.set(roomRef, {
@@ -229,12 +229,12 @@ export async function joinRoom(roomId, userId, displayName, avatarColor) {
   });
   const userRoomsRef = doc(db, "user_rooms", userId);
   const urSnap = await getDoc(userRoomsRef);
-  const rooms = urSnap.exists() ? { ...(urSnap.data().rooms || {}), [roomId]: Date.now() } : { [roomId]: Date.now() };
+  const rooms = urSnap.exists() ? { ...urSnap.data().rooms, [roomId]: Date.now() } : { [roomId]: Date.now() };
   batch.set(userRoomsRef, { rooms });
   await batch.commit();
 }
 
-export async function leaveRoom(roomId, userId) {
+async function removeUserFromRoom(roomId, userId) {
   guard();
   const batch = writeBatch(db);
   batch.delete(doc(db, "rooms", roomId, "members", userId));
@@ -242,12 +242,16 @@ export async function leaveRoom(roomId, userId) {
   const userRoomsRef = doc(db, "user_rooms", userId);
   const snap = await getDoc(userRoomsRef);
   if (snap.exists()) {
-    const rooms = { ...(snap.data().rooms || {}) };
+    const rooms = { ...snap.data().rooms };
     delete rooms[roomId];
     if (Object.keys(rooms).length === 0) batch.delete(userRoomsRef);
     else batch.set(userRoomsRef, { rooms });
   }
   await batch.commit();
+}
+
+export async function leaveRoom(roomId, userId) {
+  return removeUserFromRoom(roomId, userId);
 }
 
 export async function fetchMembers(roomId) {
@@ -277,19 +281,7 @@ export async function renameRoom(roomId, newName) {
 }
 
 export async function removeMember(roomId, userId) {
-  guard();
-  const batch = writeBatch(db);
-  batch.delete(doc(db, "rooms", roomId, "members", userId));
-
-  const userRoomsRef = doc(db, "user_rooms", userId);
-  const snap = await getDoc(userRoomsRef);
-  if (snap.exists()) {
-    const rooms = { ...(snap.data().rooms || {}) };
-    delete rooms[roomId];
-    if (Object.keys(rooms).length === 0) batch.delete(userRoomsRef);
-    else batch.set(userRoomsRef, { rooms });
-  }
-  await batch.commit();
+  return removeUserFromRoom(roomId, userId);
 }
 
 export async function addPropertyToRoom(roomId, propertyId, userId) {
@@ -359,6 +351,7 @@ export async function ensureProfile(userId, displayName) {
     const u = await withTimeout(4000, fetchUser(userId));
     return u || { id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() };
   } catch (e) {
+    console.warn("[HomeBlend] ensureProfile failed:", e.message);
     return { id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() };
   }
 }
@@ -437,7 +430,7 @@ export async function deleteRoom(roomId) {
     const urRef = doc(db, "user_rooms", uid);
     const urSnap = await getDoc(urRef);
     if (urSnap.exists()) {
-      const rooms = { ...(urSnap.data().rooms || {}) };
+      const rooms = { ...urSnap.data().rooms };
       delete rooms[roomId];
       if (Object.keys(rooms).length === 0) await deleteDoc(urRef);
       else await setDoc(urRef, { rooms });
@@ -459,21 +452,21 @@ export function subscribeToRoom(roomId, { onVotes, onProperties, onMembers } = {
   if (onVotes) {
     unsubs.push(
       onSnapshot(collection(db, "rooms", roomId, "votes"), () => {
-        if (onVotes) onVotes();
+        onVotes();
       })
     );
   }
   if (onProperties) {
     unsubs.push(
       onSnapshot(collection(db, "rooms", roomId, "properties"), () => {
-        if (onProperties) onProperties();
+        onProperties();
       })
     );
   }
   if (onMembers) {
     unsubs.push(
       onSnapshot(collection(db, "rooms", roomId, "members"), () => {
-        if (onMembers) onMembers();
+        onMembers();
       })
     );
   }

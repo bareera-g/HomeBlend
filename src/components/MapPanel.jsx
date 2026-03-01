@@ -13,9 +13,16 @@ function convexHull(pts) {
   if (s.length <= 1) return s;
   const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
   const lo = [];
-  for (const p of s) { while (lo.length >= 2 && cross(lo[lo.length - 2], lo[lo.length - 1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of s) {
+    while (lo.length >= 2 && cross(lo.at(-2), lo.at(-1), p) <= 0) lo.pop();
+    lo.push(p);
+  }
   const hi = [];
-  for (let i = s.length - 1; i >= 0; i--) { const p = s[i]; while (hi.length >= 2 && cross(hi[hi.length - 2], hi[hi.length - 1], p) <= 0) hi.pop(); hi.push(p); }
+  for (let i = s.length - 1; i >= 0; i--) {
+    const p = s[i];
+    while (hi.length >= 2 && cross(hi.at(-2), hi.at(-1), p) <= 0) hi.pop();
+    hi.push(p);
+  }
   return lo.slice(0, -1).concat(hi.slice(0, -1));
 }
 
@@ -24,7 +31,7 @@ function bufferHull(hull, pad) {
   const cy = hull.reduce((s, p) => s + p[1], 0) / hull.length;
   return hull.map(([x, y]) => {
     const dx = x - cx, dy = y - cy;
-    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const d = Math.hypot(dx, dy) || 1;
     return [x + (dx / d) * pad, y + (dy / d) * pad];
   });
 }
@@ -133,10 +140,11 @@ PropertyMarker.propTypes = {
   onClick: PropTypes.func.isRequired,
 };
 
-export default function MapPanel({ properties, swipes, blendData, selectedProperty, onSelect, dragging = false, draggedPropId = null, uniqueImageUrls, leftCollapsed }) {
-  const [viewport, setViewport] = useState({ longitude: -98.5, latitude: 39.0, zoom: 4 });
-  const [bounds, setBounds] = useState(null); // { west, south, east, north }
+export default function MapPanel({ properties, swipes, blendData, selectedProperty, onSelect, dragging = false, draggedPropId = null, uniqueImageUrls, leftCollapsed, selectedCity }) {
+  const [viewport, setViewport] = useState({ longitude: -117.8265, latitude: 33.6846, zoom: 12 });
+  const [bounds, setBounds] = useState(null);
   const mapRef = useRef(null);
+  const prevPropsRef = useRef(null);           // track previous property IDs to avoid re-fitting on every render
   const computedUrls = useMemo(() => computeUniquePropertyImages(properties), [properties]);
   const imageMap = uniqueImageUrls && Object.keys(uniqueImageUrls).length > 0 ? uniqueImageUrls : computedUrls;
 
@@ -146,7 +154,6 @@ export default function MapPanel({ properties, swipes, blendData, selectedProper
     if (!map) return;
     const b = map.getBounds();
     if (!b) return;
-    // Add a small buffer (~10% of viewport) so markers at edge don't pop in/out
     const lngSpan = b.getEast() - b.getWest();
     const latSpan = b.getNorth() - b.getSouth();
     const buf = 0.1;
@@ -158,45 +165,61 @@ export default function MapPanel({ properties, swipes, blendData, selectedProper
     });
   }, []);
 
-  /* Auto-fit bounds when properties change */
-  useEffect(() => {
-    if (!mapRef.current || properties.length === 0) return;
-    const map = mapRef.current.getMap?.();
-    if (!map) return;
-    const coords = properties.filter(p => p.lng && p.lat);
-    if (coords.length === 0) return;
-    const lngs = coords.map(p => p.lng);
-    const lats = coords.map(p => p.lat);
+  /** Fit map bounds to the given coordinates */
+  const fitToCoords = useCallback((coords, padding = 50, duration = 600) => {
+    const map = mapRef.current?.getMap?.();
+    if (!map || coords.length === 0) return;
+    const lngs = coords.map(p => p.lng ?? p[0]);
+    const lats = coords.map(p => p.lat ?? p[1]);
     const sw = [Math.min(...lngs) - 0.05, Math.min(...lats) - 0.05];
     const ne = [Math.max(...lngs) + 0.05, Math.max(...lats) + 0.05];
-    try { map.fitBounds([sw, ne], { padding: 50, duration: 600 }); } catch {}
-    // Update bounds after the fly animation settles
-    const timer = setTimeout(updateBounds, 700);
-    return () => clearTimeout(timer);
-  }, [properties, updateBounds]);
+    try { map.fitBounds([sw, ne], { padding, duration }); } catch {}
+    setTimeout(updateBounds, duration + 100);
+  }, [updateBounds]);
+
+  /* Auto-fit bounds only when the actual set of properties changes (not every render) */
+  useEffect(() => {
+    if (!mapRef.current || properties.length === 0) return;
+    const key = properties.map(p => p.id).sort().join(",");
+    if (prevPropsRef.current === key) return;   // same properties — don't re-fit
+    prevPropsRef.current = key;
+    const coords = properties.filter(p => p.lng && p.lat);
+    fitToCoords(coords);
+  }, [properties, fitToCoords]);
 
   /* Resize map when container changes (e.g. left panel collapse) */
   useEffect(() => {
     const timer = setTimeout(() => {
       const map = mapRef.current?.getMap?.();
       if (map) { map.resize(); updateBounds(); }
-    }, 300); // wait for CSS transition
+    }, 300);
     return () => clearTimeout(timer);
   }, [leftCollapsed, updateBounds]);
 
-  /* Green area highlight — convex hull, only when properties are in a local area */
+  /* Green area highlight — per-city convex hulls */
   const areaGeoJson = useMemo(() => {
-    const coords = properties.filter(p => p.lng && p.lat).map(p => [p.lng, p.lat]);
-    if (coords.length < 3) return null;
-    const lngs = coords.map(c => c[0]);
-    const lats = coords.map(c => c[1]);
-    const lngSpread = Math.max(...lngs) - Math.min(...lngs);
-    const latSpread = Math.max(...lats) - Math.min(...lats);
-    if (lngSpread > 1 || latSpread > 1) return null; // skip when spanning multiple cities
-    const hull = convexHull(coords);
-    const padded = bufferHull(hull, 0.008);
-    const ring = [...padded, padded[0]];
-    return { type: "Feature", geometry: { type: "Polygon", coordinates: [ring] } };
+    const valid = properties.filter(p => p.lng && p.lat && p.location);
+    if (valid.length < 3) return null;
+
+    // Group coords by city
+    const byCity = {};
+    valid.forEach(p => {
+      const city = p.location;
+      if (!byCity[city]) byCity[city] = [];
+      byCity[city].push([p.lng, p.lat]);
+    });
+
+    const features = [];
+    for (const [, coords] of Object.entries(byCity)) {
+      if (coords.length < 3) continue;
+      const hull = convexHull(coords);
+      if (hull.length < 3) continue;
+      const padded = bufferHull(hull, 0.008);
+      const ring = [...padded, padded[0]];
+      features.push({ type: "Feature", geometry: { type: "Polygon", coordinates: [ring] } });
+    }
+    if (features.length === 0) return null;
+    return { type: "FeatureCollection", features };
   }, [properties]);
   const visibleProps = useMemo(() => {
     let filtered = properties.filter(p => !dragging || draggedPropId === p.id);
@@ -212,6 +235,9 @@ export default function MapPanel({ properties, swipes, blendData, selectedProper
 
   const handleMove = useCallback(evt => {
     setViewport(evt.viewState);
+  }, []);
+
+  const handleMoveEnd = useCallback(() => {
     updateBounds();
   }, [updateBounds]);
 
@@ -247,6 +273,7 @@ export default function MapPanel({ properties, swipes, blendData, selectedProper
         ref={mapRef}
         {...viewport}
         onMove={handleMove}
+        onMoveEnd={handleMoveEnd}
         onLoad={updateBounds}
         mapboxAccessToken={MAPBOX_TOKEN}
         mapStyle="mapbox://styles/mapbox/light-v11"
@@ -280,24 +307,20 @@ export default function MapPanel({ properties, swipes, blendData, selectedProper
         boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
         overflow: "hidden",
       }}>
-        <button onClick={() => { const m = mapRef.current?.getMap?.(); if (m) m.zoomIn({ duration: 250 }); }}
+        <button onClick={() => setViewport(v => ({ ...v, zoom: Math.min((v.zoom || 4) + 1, 20) }))}
           title="Zoom in" style={mapBtnStyle}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.ink} strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14"/></svg>
         </button>
         <div style={{ height: 1, background: "rgba(0,0,0,0.08)" }} />
-        <button onClick={() => { const m = mapRef.current?.getMap?.(); if (m) m.zoomOut({ duration: 250 }); }}
+        <button onClick={() => setViewport(v => ({ ...v, zoom: Math.max((v.zoom || 4) - 1, 1) }))}
           title="Zoom out" style={mapBtnStyle}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.ink} strokeWidth="2" strokeLinecap="round"><path d="M5 12h14"/></svg>
         </button>
         <div style={{ height: 1, background: "rgba(0,0,0,0.08)" }} />
         <button onClick={() => {
-          const m = mapRef.current?.getMap?.();
-          if (!m) return;
           const coords = properties.filter(p => p.lng && p.lat);
           if (coords.length === 0) return;
-          const sw = [Math.min(...coords.map(p => p.lng)) - 0.05, Math.min(...coords.map(p => p.lat)) - 0.05];
-          const ne = [Math.max(...coords.map(p => p.lng)) + 0.05, Math.max(...coords.map(p => p.lat)) + 0.05];
-          try { m.fitBounds([sw, ne], { padding: 50, duration: 600 }); } catch {}
+          fitToCoords(coords);
         }} title="Fit all properties" style={mapBtnStyle}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.ink} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
         </button>
@@ -330,4 +353,5 @@ MapPanel.propTypes = {
   draggedPropId: PropTypes.string,
   uniqueImageUrls: PropTypes.object,
   leftCollapsed: PropTypes.bool,
+  selectedCity: PropTypes.string,
 };

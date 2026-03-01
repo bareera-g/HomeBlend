@@ -48,6 +48,11 @@ const AmenityIcon = memo(function AmenityIcon({ type, size = 14 }) {
   return null;
 });
 
+AmenityChip.propTypes = {
+  icon: PropTypes.string.isRequired,
+  label: PropTypes.string.isRequired,
+};
+
 AmenityIcon.propTypes = {
   type: PropTypes.string.isRequired,
   size: PropTypes.number,
@@ -96,8 +101,8 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
   }, [imgIdx, totalImgs, property.images]);
 
   return (
-    <div
-      role="dialog"
+    <dialog
+      open
       aria-modal="true"
       onClick={e => { if (e.target === e.currentTarget) close(); }}
       onKeyDown={e => { if (e.key === 'Escape') close(); }}
@@ -109,6 +114,7 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
         WebkitBackdropFilter: closing ? "none" : "blur(4px)",
         transition: "background 0.22s ease",
         animation: closing ? undefined : "fadeInFast 0.15s ease",
+        border: "none", padding: 0, margin: 0, width: "100vw", height: "100vh", maxWidth: "100vw", maxHeight: "100vh",
       }}
     >
       {/* Modal card — GPU-promoted layer */}
@@ -371,8 +377,9 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
             <div style={{ padding: "4px 28px 16px" }}>
               <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
                 {property.images.map((src, i) => (
-                  <div
+                  <button
                     key={src}
+                    type="button"
                     onClick={() => setImgIdx(i)}
                     style={{
                       height: 72, minWidth: i === 0 ? 130 : 100,
@@ -382,6 +389,7 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
                       boxShadow: i === imgIdx ? `0 0 0 2px rgba(166,124,61,0.2)` : "0 2px 8px rgba(0,0,0,0.08)",
                       opacity: i === imgIdx ? 1 : 0.7,
                       transition: "opacity 0.2s, border 0.2s, box-shadow 0.2s",
+                      padding: 0,
                     }}
                   />
                 ))}
@@ -413,7 +421,7 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
           )}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }
 

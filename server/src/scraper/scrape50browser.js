@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 /**
- * Scrape 50 US cities from rent.com — 10 listings per city.
- * Uses the same approach as rentcom.js: fetch search page, parse JSON-LD,
- * fetch detail pages for geo/price/amenities.
+ * Browser-based scraper: uses Puppeteer to fetch rent.com listings for 50 US cities.
+ * Scrapes search pages via headless Chromium, then fetches detail pages for geo/price/amenities.
  *
- * Usage:  node server/src/scraper/scrape50.js
- * Output: /tmp/scraped_properties.json
+ * Usage:  node server/src/scraper/scrape50browser.js
+ * Output: /tmp/scraped_all.json
  */
 
-const axios = require('axios');
-const cheerio = require('cheerio');
+const puppeteer = require('puppeteer-core');
 const fs = require('node:fs');
-const path = require('node:path');
 
-/* ── 50 US cities with rent.com slug patterns ─────────────────── */
 const CITIES = [
   { slug: 'new-york/new-york-apartments',           city: 'New York',         state: 'NY' },
   { slug: 'california/los-angeles-apartments',       city: 'Los Angeles',      state: 'CA' },
@@ -71,99 +67,7 @@ const LIMIT = 10;
 const BASE = 'https://www.rent.com';
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-const UAS = [
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36',
-];
-function headers() {
-  return {
-    'User-Agent': UAS[Math.floor(Math.random() * UAS.length)],
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection': 'keep-alive',
-  };
-}
-
-/* ── Search page: extract JSON-LD listings ──────────────── */
-async function scrapeSearchPage(slug) {
-  const url = `${BASE}/${slug}`;
-  console.log(`  Fetching ${url}`);
-  const { data: html } = await axios.get(url, { headers: headers(), timeout: 15000 });
-  const $ = cheerio.load(html);
-  const results = [];
-  $('script[type="application/ld+json"]').each((_, script) => {
-    try {
-      const data = JSON.parse($(script).html());
-      if (data['@type'] === 'ApartmentComplex') {
-        const addr = data.address || {};
-        const images = (data.image || []).map(img => typeof img === 'string' ? img : img?.contentUrl).filter(Boolean);
-        results.push({
-          name: data.name || '',
-          detailUrl: data.url || '',
-          city: addr.addressLocality || '',
-          state: addr.addressRegion || '',
-          images,
-        });
-      }
-    } catch { /* skip bad JSON */ }
-  });
-  return results.slice(0, LIMIT);
-}
-
-/* ── Detail page: extract geo, price, amenities, etc. ──── */
-async function fetchDetail(detailUrl) {
-  if (!detailUrl?.startsWith('http')) return null;
-  try {
-    const { data: html } = await axios.get(detailUrl, { headers: headers(), timeout: 15000 });
-    const $ = cheerio.load(html);
-    let mainEntity = null, aboutProduct = null;
-    $('script[type="application/ld+json"]').each((_, script) => {
-      try {
-        const data = JSON.parse($(script).html());
-        if (data['@type'] === 'ItemPage') { mainEntity = data.mainEntity; aboutProduct = data.about; }
-        else if (data['@type'] === 'ApartmentComplex') mainEntity = data;
-      } catch { /* skip */ }
-    });
-    if (!mainEntity) return null;
-    const addr = mainEntity.address || {};
-    const geo = mainEntity.geo || {};
-    const offers = aboutProduct?.offers || mainEntity.offers || {};
-    const amenities = (mainEntity.amenityFeature || []).filter(a => a.value === true).map(a => a.name).filter(Boolean);
-    const floorplans = (mainEntity.containsPlace || []).map(p => {
-      const rooms = p.numberOfRooms || [];
-      let beds = 0, baths = 0;
-      for (const r of rooms) {
-        if (r.unitText === 'Bedrooms') beds = r.value || 0;
-        if (r.unitText === 'Bathrooms') baths = r.value || 0;
-      }
-      return { beds, baths, sqft: p.floorSize?.value || 0 };
-    });
-    const images = (mainEntity.image || []).map(img => typeof img === 'string' ? img : img?.contentUrl).filter(Boolean);
-    return {
-      name: mainEntity.name || '',
-      city: addr.addressLocality || '',
-      state: addr.addressRegion || '',
-      lat: geo.latitude || null,
-      lng: geo.longitude || null,
-      description: (mainEntity.description || aboutProduct?.description || '').slice(0, 500),
-      lowPrice: offers.lowPrice || null,
-      highPrice: offers.highPrice || null,
-      images: images.slice(0, 8),
-      amenities,
-      floorplans,
-      petFriendly: amenities.some(a => /pet/i.test(a)),
-      hasParking: amenities.some(a => /parking|garage/i.test(a)),
-      hasInUnitLaundry: amenities.some(a => /washer|dryer|laundry|in[- ]unit/i.test(a)),
-    };
-  } catch (err) {
-    console.log(`    Detail error: ${err.message}`);
-    return null;
-  }
-}
-
-/* ── Transform to properties.js format ────────────────── */
+/* ── Transform a rent.com listing to HomeBlend schema ──── */
 function transform(summary, detail, id, cityMeta) {
   const name = detail?.name || summary.name || 'Rental Listing';
   const city = detail?.city || summary.city || cityMeta.city;
@@ -208,76 +112,151 @@ function transform(summary, detail, id, cityMeta) {
   const images = (detail?.images?.length > 0 ? detail.images : summary.images || []).slice(0, 8);
   const desc = detail?.description || '';
   const aiOverview = desc.length > 30 ? desc.replaceAll(/\s+/g, ' ').slice(0, 500)
-    : `${name} offers ${beds > 0 ? beds + '-bedroom' : 'studio'} rental living in ${city}. ${finalTags.length > 0 ? `Features include ${finalTags.join(', ').toLowerCase()}.` : ''}`;
+    : `${name} offers ${beds > 0 ? beds + '-bedroom' : 'studio'} rental living in ${city}, ${state}. ${finalTags.length > 0 ? `Features include ${finalTags.join(', ').toLowerCase()}.` : ''}`;
   return {
-    id,
-    title: name,
-    location: `${city}, ${state}`,
-    price,
-    priceNum: priceNum || 0,
-    category,
-    beds, baths, sqft,
-    yearBuilt: null,
-    tags: finalTags,
-    petFriendly: detail?.petFriendly ?? false,
+    id, title: name, location: `${city}, ${state}`,
+    price, priceNum: priceNum || 0, category,
+    beds, baths, sqft, yearBuilt: null,
+    tags: finalTags, petFriendly: detail?.petFriendly ?? false,
     parking, laundry,
-    lng: detail?.lng || null,
-    lat: detail?.lat || null,
-    images,
-    aiOverview,
+    lng: detail?.lng || null, lat: detail?.lat || null,
+    images, aiOverview,
     listingUrl: summary.detailUrl || '',
   };
 }
 
 /* ── Main ──────────────────────────────────────────────── */
 async function main() {
-  console.log(`\nScraping ${CITIES.length} cities, ${LIMIT} per city...\n`);
+  console.log(`Launching browser...`);
+  const browser = await puppeteer.launch({
+    executablePath: '/usr/bin/chromium-browser',
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+  });
+  const page = await browser.newPage();
+  await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+  // Block images/css/fonts for speed
+  await page.setRequestInterception(true);
+  page.on('request', req => {
+    const rt = req.resourceType();
+    if (['image', 'stylesheet', 'font', 'media'].includes(rt)) req.abort();
+    else req.continue();
+  });
+
   const all = [];
   let nextId = 71; // existing properties are 1-70
   let successCities = 0;
 
   for (let ci = 0; ci < CITIES.length; ci++) {
     const c = CITIES[ci];
-    console.log(`\n[${ci + 1}/${CITIES.length}] ${c.city}, ${c.state}`);
-    let summaries = [];
+    const url = `${BASE}/${c.slug}`;
+    console.log(`\n[${ci + 1}/${CITIES.length}] ${c.city}, ${c.state} — ${url}`);
+
     try {
-      summaries = await scrapeSearchPage(c.slug);
-    } catch (err) {
-      console.log(`  ✗ Search failed: ${err.message}`);
-      continue;
-    }
-    if (summaries.length === 0) { console.log('  ○ No results'); continue; }
-    console.log(`  Found ${summaries.length} listings, enriching...`);
-    successCities++;
-    for (const summary of summaries) {
-      let detail = null;
-      if (summary.detailUrl) {
-        try {
-          detail = await fetchDetail(summary.detailUrl);
-          await sleep(600 + Math.random() * 800);
-        } catch (err) {
-          console.log(`    ✗ Detail: ${err.message}`);
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      await sleep(2000); // let JSON-LD scripts settle
+
+      // Extract search page JSON-LD summaries
+      const summaries = await page.evaluate((limit) => {
+        const els = document.querySelectorAll('script[type="application/ld+json"]');
+        const results = [];
+        for (const el of els) {
+          try {
+            const data = JSON.parse(el.textContent);
+            if (data['@type'] === 'ApartmentComplex') {
+              const addr = data.address || {};
+              const images = (data.image || []).map(img => typeof img === 'string' ? img : img?.contentUrl).filter(Boolean);
+              results.push({
+                name: data.name || '',
+                detailUrl: data.url || '',
+                city: addr.addressLocality || '',
+                state: addr.addressRegion || '',
+                images,
+              });
+            }
+          } catch { /* skip */ }
         }
+        return results.slice(0, limit);
+      }, LIMIT);
+
+      if (summaries.length === 0) { console.log('  ○ No results'); continue; }
+      console.log(`  Found ${summaries.length} listings, enriching details...`);
+      successCities++;
+
+      for (const summary of summaries) {
+        if (!summary.detailUrl) continue;
+        try {
+          await page.goto(summary.detailUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+          await sleep(1500);
+
+          const detail = await page.evaluate(() => {
+            const els = document.querySelectorAll('script[type="application/ld+json"]');
+            let mainEntity = null, aboutProduct = null;
+            for (const el of els) {
+              try {
+                const data = JSON.parse(el.textContent);
+                if (data['@type'] === 'ItemPage') { mainEntity = data.mainEntity; aboutProduct = data.about; }
+                else if (data['@type'] === 'ApartmentComplex') mainEntity = data;
+              } catch { /* skip */ }
+            }
+            if (!mainEntity) return null;
+            const addr = mainEntity.address || {};
+            const geo = mainEntity.geo || {};
+            const offers = aboutProduct?.offers || mainEntity.offers || {};
+            const amenities = (mainEntity.amenityFeature || []).filter(a => a.value === true).map(a => a.name).filter(Boolean);
+            const floorplans = (mainEntity.containsPlace || []).map(p => {
+              const rooms = p.numberOfRooms || [];
+              let beds = 0, baths = 0;
+              for (const r of rooms) {
+                if (r.unitText === 'Bedrooms') beds = r.value || 0;
+                if (r.unitText === 'Bathrooms') baths = r.value || 0;
+              }
+              return { beds, baths, sqft: p.floorSize?.value || 0 };
+            });
+            const images = (mainEntity.image || []).map(img => typeof img === 'string' ? img : img?.contentUrl).filter(Boolean);
+            return {
+              name: mainEntity.name || '',
+              city: addr.addressLocality || '',
+              state: addr.addressRegion || '',
+              lat: geo.latitude || null,
+              lng: geo.longitude || null,
+              description: (mainEntity.description || aboutProduct?.description || '').slice(0, 500),
+              lowPrice: offers.lowPrice || null,
+              highPrice: offers.highPrice || null,
+              images: images.slice(0, 8),
+              amenities,
+              floorplans,
+              petFriendly: amenities.some(a => /pet/i.test(a)),
+              hasParking: amenities.some(a => /parking|garage/i.test(a)),
+              hasInUnitLaundry: amenities.some(a => /washer|dryer|laundry|in[- ]unit/i.test(a)),
+            };
+          });
+
+          if (detail?.lat && detail?.lng && (detail?.images?.length > 0 || summary.images.length > 0)) {
+            const prop = transform(summary, detail, nextId, c);
+            if (prop.images.length > 0) {
+              all.push(prop);
+              nextId++;
+              process.stdout.write(`    ✓ ${prop.title.slice(0,40)}\n`);
+            }
+          }
+        } catch (err) {
+          console.warn(`  Skipped listing: ${err.message}`);
+        }
+        await sleep(400 + Math.random() * 600);
       }
-      // Skip if no images or no geo
-      if (!detail?.lat && !detail?.images?.length) { continue; }
-      const prop = transform(summary, detail, nextId, c);
-      if (prop.images.length > 0 && prop.lat && prop.lng) {
-        all.push(prop);
-        nextId++;
-      }
+    } catch (err) {
+      console.log(`  ✗ Failed: ${err.message}`);
     }
-    // Polite delay between cities
-    if (ci < CITIES.length - 1) {
-      const delay = 1000 + Math.random() * 1500;
-      await sleep(delay);
-    }
+
+    // Small delay between cities
+    if (ci < CITIES.length - 1) await sleep(800 + Math.random() * 1200);
   }
 
+  await browser.close();
   console.log(`\n✓ Scraped ${all.length} listings from ${successCities} cities`);
-  const outPath = '/tmp/scraped_properties.json';
-  fs.writeFileSync(outPath, JSON.stringify(all, null, 2));
-  console.log(`Wrote to ${outPath}`);
+  fs.writeFileSync('/tmp/scraped_all.json', JSON.stringify(all, null, 2));
+  console.log('Wrote to /tmp/scraped_all.json');
 }
 
 main().catch(err => { console.error('Fatal:', err); process.exit(1); });

@@ -19,7 +19,6 @@ import PropertyModal      from "./PropertyModal.jsx";
 import BlendPanel         from "./BlendPanel.jsx";
 import GroupPicksPanel    from "./GroupPicksPanel.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
-import LoadingScreen      from "./LoadingScreen.jsx";
 import { RoomViewSkeleton } from "./Skeleton.jsx";
 import MemberAvatars      from "./MemberAvatars.jsx";
 
@@ -378,6 +377,9 @@ export default function RoomView() {
               </form>
             ) : (
               <h1 onClick={() => { if (isOwner) { setEditNameValue(room?.name || ""); setEditingName(true); } }}
+                onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && isOwner) { e.preventDefault(); setEditNameValue(room?.name || ""); setEditingName(true); } }}
+                role={isOwner ? "button" : undefined}
+                tabIndex={isOwner ? 0 : undefined}
                 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 500, color: B.ink, letterSpacing: 0.3, margin: 0, lineHeight: 1.2, cursor: isOwner ? "pointer" : "default", display: "flex", alignItems: "center", gap: 6 }}>
                 {room?.name || "Room"}
                 {isOwner && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" style={{ opacity: 0.5 }}><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>}
@@ -479,7 +481,10 @@ export default function RoomView() {
 
             {/* Member avatars with owner management dropdown */}
             <div ref={memberMenuRef} style={{ position: "relative" }}>
-              <div onClick={() => { if (isOwner) setShowMemberMenu(v => !v); }}
+              <div role={isOwner ? "button" : undefined}
+                tabIndex={isOwner ? 0 : undefined}
+                onClick={() => { if (isOwner) setShowMemberMenu(v => !v); }}
+                onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && isOwner) { e.preventDefault(); setShowMemberMenu(v => !v); } }}
                 onMouseEnter={e => e.currentTarget.style.opacity = "0.8"}
                 onMouseLeave={e => e.currentTarget.style.opacity = "1"}
                 style={{ cursor: isOwner ? "pointer" : "default", transition: "opacity 0.15s" }}>
@@ -502,7 +507,7 @@ export default function RoomView() {
                         {m.display_name || "Member"}
                         {m.role === "owner" && <span style={{ marginLeft: 4, fontSize: 9, color: B.gold, fontWeight: 600 }}>Owner</span>}
                       </span>
-                      {m.role !== "owner" && (
+                      {m.role !== "owner" && m.auth_user_id !== user?.id && (
                         <button onClick={async () => {
                           if (!confirm(`Remove ${m.display_name || "this member"} from the room?`)) return;
                           await removeMember(room.id, m.auth_user_id);

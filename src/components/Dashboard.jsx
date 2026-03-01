@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, memo } from "react";
 import PropTypes from "prop-types";
 import { useNavigate } from "react-router-dom";
 import { B, Icon, IC, LogoMark } from "../Brand.jsx";
@@ -14,7 +14,6 @@ import {
 import { PROPERTIES } from "../data/properties.js";
 import { computeUniquePropertyImages } from "../lib/uniquePropertyImages.js";
 import MapPanel from "./MapPanel.jsx";
-import LoadingScreen from "./LoadingScreen.jsx";
 import { DashboardSkeleton } from "./Skeleton.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
 import PropertyExpandModal from "./PropertyExpandModal.jsx";
@@ -31,6 +30,36 @@ const PRICE_STEPS = [
 function priceToIndex(p) {
   const idx = PRICE_STEPS.findIndex(s => s >= p);
   return idx >= 0 ? idx : PRICE_STEPS.length - 1;
+}
+
+function matchesFilters(p, { selectedCity, filter: f, savedIds, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq }) {
+  if (selectedCity !== "All" && p.location !== selectedCity) return false;
+  if (f === "saved" && !savedIds.includes(p.id)) return false;
+  if (category !== "All" && p.category !== category) return false;
+  if (p.priceNum > maxPrice) return false;
+  if (minBeds  > 0 && p.beds  < minBeds)  return false;
+  if (minBaths > 0 && p.baths < minBaths) return false;
+  if (petOnly    && !p.petFriendly) return false;
+  if (parkingReq && !p.parking)    return false;
+  if (laundryReq && p.laundry !== "In-unit") return false;
+  return true;
+}
+
+function sortProperties(list, sortBy) {
+  if (sortBy === "price-asc")  return [...list].sort((a, b) => a.priceNum - b.priceNum);
+  if (sortBy === "price-desc") return [...list].sort((a, b) => b.priceNum - a.priceNum);
+  if (sortBy === "newest")     return [...list].sort((a, b) => b.yearBuilt - a.yearBuilt);
+  if (sortBy === "largest")    return [...list].sort((a, b) => b.sqft - a.sqft);
+  return list;
+}
+
+async function buildRoomMeta(roomList) {
+  const meta = {};
+  await Promise.all(roomList.map(async room => {
+    const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
+    meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
+  }));
+  return meta;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -76,7 +105,7 @@ export default function Dashboard() {
   const [expandedProperty, setExpandedProperty] = useState(null); // full-screen detail modal
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);  // header avatar popover
   const [leftCollapsed, setLeftCollapsed] = useState(false);    // left panel minimized
-  const [selectedCity, setSelectedCity] = useState("All");       // city filter
+  const [selectedCity, setSelectedCity] = useState("Irvine, CA"); // city filter (faster default dataset)
   const [citySearch, setCitySearch] = useState("");             // city autocomplete query
   const [showCityPicker, setShowCityPicker] = useState(false);  // city dropdown open
 
@@ -150,14 +179,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
     const start = Date.now();
-    async function buildRoomMeta(roomList) {
-      const meta = {};
-      await Promise.all(roomList.map(async room => {
-        const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
-        meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
-      }));
-      return meta;
-    }
     async function init() {
       setLoading(true);
       try {
@@ -199,7 +220,7 @@ export default function Dashboard() {
   // ── City list derived from all properties ──────────────────────────────────
   const allCities = useMemo(() => {
     const set = new Set(PROPERTIES.map(p => p.location));
-    return ["All", ...Array.from(set).sort()];
+    return ["All", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
   }, []);
 
   // Close city picker on outside click
@@ -214,26 +235,13 @@ export default function Dashboard() {
 
   // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
-    let list = PROPERTIES.filter(p => {
-      if (selectedCity !== "All" && p.location !== selectedCity) return false;
-      if (filter === "saved" && !savedIds.includes(p.id)) return false;
-      if (category !== "All" && p.category !== category) return false;
-      if (p.priceNum > maxPrice) return false;
-      if (minBeds  > 0 && p.beds  < minBeds)  return false;
-      if (minBaths > 0 && p.baths < minBaths) return false;
-      if (petOnly    && !p.petFriendly) return false;
-      if (parkingReq && !p.parking)    return false;
-      if (laundryReq && p.laundry !== "In-unit") return false;
-      return true;
-    });
-    if      (sortBy === "price-asc")  list = [...list].sort((a, b) => a.priceNum - b.priceNum);
-    else if (sortBy === "price-desc") list = [...list].sort((a, b) => b.priceNum - a.priceNum);
-    else if (sortBy === "newest")     list = [...list].sort((a, b) => b.yearBuilt - a.yearBuilt);
-    else if (sortBy === "largest")    list = [...list].sort((a, b) => b.sqft - a.sqft);
-    return list;
+    const filterOpts = { selectedCity, filter, savedIds, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq };
+    const list = PROPERTIES.filter(p => matchesFilters(p, filterOpts));
+    return sortProperties(list, sortBy);
   }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds, selectedCity]);
 
   const uniqueImageUrls = useMemo(() => computeUniquePropertyImages(filtered), [filtered]);
+  const savedIdSet = useMemo(() => new Set(savedIds), [savedIds]);
 
   const activeFilters = [
     maxPrice < PRICE_STEPS.at(-1), minBeds > 0, minBaths > 0,
@@ -666,11 +674,11 @@ export default function Dashboard() {
             <div ref={cityPickerRef} style={{ position: "relative", flexShrink: 0 }}>
               <button onClick={() => { setShowCityPicker(v => !v); setCitySearch(""); }} style={{
                 display: "flex", alignItems: "center", gap: 4, padding: "4px 10px 4px 7px", borderRadius: 14,
-                background: selectedCity !== "All" ? "rgba(166,124,61,0.12)" : "rgba(167,146,119,0.1)",
-                border: `1px solid ${selectedCity !== "All" ? B.gold : B.border}`, flexShrink: 0,
+                background: selectedCity === "All" ? "rgba(167,146,119,0.1)" : "rgba(166,124,61,0.12)",
+                border: `1px solid ${selectedCity === "All" ? B.border : B.gold}`, flexShrink: 0,
                 cursor: "pointer", transition: "all 0.15s",
               }}>
-                <Icon d={IC.pin} size={12} color={selectedCity !== "All" ? B.gold : B.muted} sw={1.6} />
+                <Icon d={IC.pin} size={12} color={selectedCity === "All" ? B.muted : B.gold} sw={1.6} />
                 <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.ink, fontWeight: 500, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {selectedCity === "All" ? "All Cities" : selectedCity}
                 </span>
@@ -856,7 +864,7 @@ export default function Dashboard() {
               <div key={p.id} id={`property-card-${p.id}`} style={{ scrollMargin: 12 }}>
                 <PropertyCard
                   property={p}
-                  saved={savedIds.includes(p.id)}
+                  saved={savedIdSet.has(p.id)}
                   isDragging={draggedPropId === p.id}
                   isHighlighted={highlightedPropertyId === p.id}
                   onSave={e => toggleSave(p.id, e)}
@@ -901,6 +909,7 @@ export default function Dashboard() {
             draggedPropId={draggedPropId}
             uniqueImageUrls={uniqueImageUrls}
             leftCollapsed={leftCollapsed}
+            selectedCity={selectedCity}
           />
         </div>
 
@@ -1119,6 +1128,7 @@ export default function Dashboard() {
         <div
           role="dialog"
           aria-modal="true"
+          tabIndex={-1}
           onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); } }}
           onKeyDown={e => { if (e.key === 'Escape') { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); } }}
           style={{
@@ -1372,10 +1382,18 @@ function roomCardShadow(isOver, isAdded, draggingActive) {
 function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingActive, setRef, onOpen }) {
   const thumbIds = (meta.propIds || []).slice(0, 4);
   const [hovered, setHovered] = useState(false);
+  const cardBorderLeft = (() => {
+    if (isOver) return `4px solid ${B.gold}`;
+    if (isAdded) return "4px solid #4A7C59";
+    return `4px solid ${B.muted}`;
+  })();
   return (
     <div
       ref={setRef}
+      role="button"
+      tabIndex={0}
       onClick={() => { if (!draggingActive) onOpen(); }}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (!draggingActive) onOpen(); } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -1383,7 +1401,7 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
         minHeight: (draggingActive || isOver) ? 130 : 120,
         borderRadius: 13,
         border: "none",
-        borderLeft: isOver ? `4px solid ${B.gold}` : isAdded ? "4px solid #4A7C59" : `4px solid ${B.muted}`,
+        borderLeft: cardBorderLeft,
         background: roomCardBg(isOver, isAdded, draggingActive),
         backdropFilter: "blur(10px)",
         padding: (draggingActive || isOver) ? "14px 15px 22px" : "14px 15px",
@@ -1553,7 +1571,10 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
   return (
     <div
       ref={cardRef}
+      role="button"
+      tabIndex={0}
       onMouseDown={e => onMouseDown(e, property.id)}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onMouseDown(e, property.id); } }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -1898,6 +1919,8 @@ PropertyCard.propTypes = {
   onMouseDown: PropTypes.func,
   primaryImageUrl: PropTypes.string,
 };
+
+const MemoPropertyCard = memo(PropertyCard);
 
 /* ── Amenity Icon (SVG, no emoji) ──────────────────────────────────────────── */
 function AmenityIcon({ type, size = 12 }) {

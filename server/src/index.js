@@ -14,7 +14,20 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 /* ── Middleware ──────────────────────────────────────────── */
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+const allowedOrigins = new Set((process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim()));
+app.use(cors({
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, curl, etc.)
+    if (!origin || allowedOrigins.has('*') || allowedOrigins.has(origin)) {
+      return cb(null, true);
+    }
+    // Also allow any localhost port in development
+    if (process.env.NODE_ENV !== 'production' && /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+      return cb(null, true);
+    }
+    cb(new Error('Not allowed by CORS'));
+  },
+}));
 app.use(express.json());
 
 /* ── Health check ───────────────────────────────────────── */
@@ -28,6 +41,24 @@ app.use('/api/sessions', swipeRoutes);
 app.use('/api/sessions', listingRoutes);
 app.use('/api/sessions', leaderboardRoutes);
 app.use('/api/sessions', streamRouter);
+
+/* ── Public listings endpoint (no session required) ─────── */
+const allProperties = require('./data/properties.json');
+const { cleanPropertyOverview } = require('./utils/overviewGenerator');
+const propertyMap = new Map(allProperties.map((p) => [p.id, p]));
+
+app.get('/api/listings', (req, res) => {
+  const ids = (req.query.ids || '')
+    .split(',')
+    .map((s) => {
+      const n = Number(s.trim());
+      return Number.isNaN(n) ? s.trim() : n;
+    })
+    .filter(Boolean);
+  if (!ids.length) return res.status(400).json({ error: 'ids query param required (comma-separated)' });
+  const found = ids.map((id) => propertyMap.get(id)).filter(Boolean).map(cleanPropertyOverview);
+  res.json({ listings: found, total: found.length });
+});
 
 /* ── SSE broadcast hooks ────────────────────────────────── */
 // Wrap swipe + status endpoints to broadcast after mutation
@@ -78,8 +109,8 @@ app.use((err, _req, res, _next) => {
 });
 
 /* ── Start ──────────────────────────────────────────────── */
-app.listen(PORT, () => {
-  console.log(`\n  🏠 HomeBlend server running on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n  🏠 HomeBlend server running on http://0.0.0.0:${PORT}`);
   console.log(`  📋 Health check:  http://localhost:${PORT}/health\n`);
 });
 

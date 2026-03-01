@@ -2,6 +2,7 @@
  * Skeleton placeholder components — LinkedIn-style shimmer blocks
  * that match HomeBlend's warm ivory/gold palette.
  */
+import PropTypes from "prop-types";
 import { B } from "../Brand.jsx";
 
 const SHIMMER_BG = `linear-gradient(90deg, rgba(167,146,119,0.08) 25%, rgba(167,146,119,0.18) 50%, rgba(167,146,119,0.08) 75%)`;
@@ -24,8 +25,85 @@ function Block({ w = "100%", h = 14, r = 6, style = {} }) {
   );
 }
 
+Block.propTypes = {
+  w: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  h: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  r: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+  style: PropTypes.object,
+};
+
 function Circle({ size = 40, style = {} }) {
   return <Block w={size} h={size} r="50%" style={style} />;
+}
+
+Circle.propTypes = {
+  size: PropTypes.number,
+  style: PropTypes.object,
+};
+
+/* ── Animated house loader — fills skeleton map/content placeholders ── */
+function HouseLoader() {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
+      opacity: 0.32, animation: "houseBreath 2.4s ease-in-out infinite",
+    }}>
+      <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+        {/* Roof */}
+        <path
+          d="M60 12L14 56h12v48h68V56h12L60 12z"
+          fill="rgba(167,146,119,0.12)"
+          stroke="rgba(167,146,119,0.35)"
+          strokeWidth="2.5"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+        />
+        {/* Door */}
+        <rect x="48" y="72" width="24" height="32" rx="3"
+          fill="rgba(167,146,119,0.15)" stroke="rgba(167,146,119,0.30)" strokeWidth="1.5" />
+        {/* Door knob */}
+        <circle cx="66" cy="90" r="2.5" fill="rgba(167,146,119,0.35)" />
+        {/* Left window */}
+        <rect x="30" y="62" width="14" height="14" rx="2.5"
+          fill="rgba(167,146,119,0.10)" stroke="rgba(167,146,119,0.28)" strokeWidth="1.5" />
+        <line x1="37" y1="62" x2="37" y2="76" stroke="rgba(167,146,119,0.22)" strokeWidth="1" />
+        <line x1="30" y1="69" x2="44" y2="69" stroke="rgba(167,146,119,0.22)" strokeWidth="1" />
+        {/* Right window */}
+        <rect x="76" y="62" width="14" height="14" rx="2.5"
+          fill="rgba(167,146,119,0.10)" stroke="rgba(167,146,119,0.28)" strokeWidth="1.5" />
+        <line x1="83" y1="62" x2="83" y2="76" stroke="rgba(167,146,119,0.22)" strokeWidth="1" />
+        <line x1="76" y1="69" x2="90" y2="69" stroke="rgba(167,146,119,0.22)" strokeWidth="1" />
+        {/* Chimney */}
+        <rect x="78" y="22" width="12" height="24" rx="2"
+          fill="rgba(167,146,119,0.12)" stroke="rgba(167,146,119,0.30)" strokeWidth="1.5" />
+        {/* Chimney smoke — three puffs, animated */}
+        <circle cx="84" cy="16" r="3" fill="rgba(167,146,119,0.18)">
+          <animate attributeName="cy" values="16;8;2" dur="2.4s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.25;0.12;0" dur="2.4s" repeatCount="indefinite" />
+        </circle>
+        <circle cx="80" cy="12" r="2" fill="rgba(167,146,119,0.14)">
+          <animate attributeName="cy" values="12;5;-1" dur="2.8s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.2;0.08;0" dur="2.8s" repeatCount="indefinite" />
+        </circle>
+        <circle cx="88" cy="14" r="2.5" fill="rgba(167,146,119,0.16)">
+          <animate attributeName="cy" values="14;6;0" dur="3.0s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.22;0.1;0" dur="3.0s" repeatCount="indefinite" />
+        </circle>
+      </svg>
+      <span style={{
+        fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 500,
+        color: "rgba(167,146,119,0.7)", letterSpacing: 0.5,
+      }}>
+        Loading your homes…
+      </span>
+      <style>{`
+        @keyframes houseBreath {
+          0%, 100% { transform: scale(1); opacity: 0.32; }
+          50%      { transform: scale(1.04); opacity: 0.45; }
+        }
+      `}</style>
+    </div>
+  );
 }
 
 /* ── Property card skeleton (matches PropertyCard layout) ────────────── */
@@ -121,17 +199,14 @@ export function DashboardSkeleton() {
           </div>
         </div>
 
-        {/* Map area placeholder */}
+        {/* Map area placeholder — animated house loader */}
         <div style={{ flex: 1, position: "relative" }}>
           <div style={{
             position: "absolute", inset: 0,
             background: "linear-gradient(135deg, rgba(167,146,119,0.06) 0%, rgba(167,146,119,0.03) 100%)",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            <div style={{ textAlign: "center", opacity: 0.4 }}>
-              <Block w={48} h={48} r={12} style={{ margin: "0 auto 12px" }} />
-              <Block w={100} h={12} r={5} style={{ margin: "0 auto" }} />
-            </div>
+            <HouseLoader />
           </div>
         </div>
       </div>
@@ -213,16 +288,13 @@ export function RoomViewSkeleton() {
             <Block w={80} h={30} r={20} />
             <Block w={70} h={30} r={20} />
           </div>
-          {/* Content placeholder */}
+          {/* Content placeholder — animated house loader */}
           <div style={{
             flex: 1,
             background: "linear-gradient(135deg, rgba(167,146,119,0.06) 0%, rgba(167,146,119,0.02) 100%)",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            <div style={{ textAlign: "center", opacity: 0.35 }}>
-              <Block w={56} h={56} r={14} style={{ margin: "0 auto 14px" }} />
-              <Block w={120} h={12} r={5} style={{ margin: "0 auto" }} />
-            </div>
+            <HouseLoader />
           </div>
         </div>
       </div>

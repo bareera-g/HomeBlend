@@ -13,6 +13,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+package-lock.json
 
 # ======================
 # Build outputs
@@ -25,6 +26,22 @@ out/
 # Vite
 # ======================
 .vite/
+
+# ======================
+# Expo / React Native
+# ======================
+.expo/
+apps/mobile/.expo/
+apps/mobile/dist/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+android/
+ios/
 
 # ======================
 # OS / Editor junk
@@ -56,3 +73,4 @@ coverage/
 # Misc
 # ======================
 *.local
+*.tsbuildinfo
