@@ -53,6 +53,7 @@ export default function Dashboard() {
   const [newRoomName,     setNewRoomName]    = useState("");
   const [createdRoom,     setCreatedRoom]    = useState(null);   // { name, room_code } after creation
   const [codeCopied,      setCodeCopied]     = useState(false);
+  const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
 
   // Refs for custom drag system
   const dragRef      = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
@@ -170,6 +171,13 @@ export default function Dashboard() {
       if (!room) { setJoinErr("Room not found."); setBusy(false); return; }
       nav(`/room/${code}`);
     } catch { setJoinErr("Could not join."); } finally { setBusy(false); }
+  }
+
+  function handleOpenRoom(e, code, name) {
+    const cx = e?.clientX ?? window.innerWidth / 2;
+    const cy = e?.clientY ?? window.innerHeight / 2;
+    setRoomTransition({ cx, cy, code, name: name || "Unnamed Room" });
+    setTimeout(() => nav(`/room/${code}`), 950);
   }
 
   function resetFilters() {
@@ -450,7 +458,7 @@ export default function Dashboard() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
 
         {/* ── Properties panel ──────────────────────────────────────────────── */}
-        <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
+        <div style={{ width: 440, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
           {/* Sub-header: category chips + count */}
           <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
@@ -570,47 +578,60 @@ export default function Dashboard() {
             onSelect={p => setSelected(prev => prev?.id === p.id ? null : p)}
           />
 
-          {/* Rooms toggle FAB (when panel is closed) */}
-          {!showRooms && (
-            <button
-              onClick={() => setShowRooms(true)}
-              style={{
-                position: "absolute", bottom: 24, right: 24,
-                display: "flex", alignItems: "center", gap: 7,
-                padding: "10px 18px", borderRadius: 12,
-                background: "rgba(251,247,241,0.96)", backdropFilter: "blur(16px)",
-                border: `1px solid ${B.border}`,
-                boxShadow: "0 4px 24px rgba(40,24,8,0.15)",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, color: B.ink,
-                cursor: "pointer", transition: "all 0.18s",
-                animation: "slideUp 0.25s ease",
-              }}
-            >
-              <Icon d={IC.home} size={14} color={B.gold} sw={1.8} />
-              My Rooms
-              {rooms.length > 0 && (
-                <span style={{ padding: "1px 6px", borderRadius: 10, background: B.gold, fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff" }}>{rooms.length}</span>
-              )}
-            </button>
-          )}
         </div>
 
-        {/* ── Rooms slide-out panel (from right, overlays map) ──────────────── */}
-        {showRooms && (
-          <>
-            {/* Backdrop click-away */}
-            <div
-              onClick={() => { if (!dragging) setShowRooms(false); }}
-              style={{ position: "absolute", inset: 0, zIndex: 40 }}
-            />
-            <div style={{
-              position: "absolute", top: 0, right: 0, bottom: 0, width: 360,
-              background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
-              borderLeft: `1px solid ${B.border}`,
-              boxShadow: "-16px 0 60px rgba(40,24,8,0.15)",
-              animation: "slideInR 0.28s cubic-bezier(.16,1,.3,1)",
-              display: "flex", flexDirection: "column", zIndex: 45, overflow: "hidden",
-            }}>
+        {/* ── Rooms panel + tab (single sliding unit) ───────────────────────── */}
+        <div
+          style={{
+            position: "absolute", top: 0, right: 0, bottom: 0,
+            width: 404,
+            display: "flex", flexDirection: "row",
+            transform: showRooms ? "translateX(0)" : "translateX(376px)",
+            transition: "transform 0.32s cubic-bezier(.16,1,.3,1)",
+            zIndex: 45, pointerEvents: "auto",
+          }}
+        >
+          {/* Pull tab (left edge — attached to panel) */}
+          <button
+            onClick={() => setShowRooms(v => !v)}
+            style={{
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 7,
+              width: 28, flexShrink: 0,
+              borderRadius: "12px 0 0 12px",
+              background: "rgba(251,247,241,0.97)", backdropFilter: "blur(16px)",
+              border: `1px solid ${B.border}`, borderRight: "none",
+              boxShadow: "-4px 0 20px rgba(40,24,8,0.12)",
+              cursor: "pointer", padding: 0,
+              alignSelf: "center",
+            }}
+            title={showRooms ? "Close rooms" : "Open rooms"}
+          >
+            <Icon d={IC.home} size={12} color={B.gold} sw={1.8} />
+            <span style={{
+              writingMode: "vertical-rl",
+              transform: "rotate(180deg)",
+              fontFamily: "'DM Sans', sans-serif",
+              fontSize: 8.5, fontWeight: 700,
+              letterSpacing: 1.8, textTransform: "uppercase",
+              color: B.ink, userSelect: "none",
+            }}>Rooms</span>
+            {rooms.length > 0 && (
+              <span style={{
+                width: 16, height: 16, borderRadius: "50%",
+                background: B.gold, display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 800, color: "#FAF6EE", flexShrink: 0,
+              }}>{rooms.length}</span>
+            )}
+          </button>
+
+          {/* Panel content */}
+          <div style={{
+            width: 376, flexShrink: 0,
+            background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
+            borderLeft: `1px solid ${B.border}`,
+            boxShadow: "-16px 0 60px rgba(40,24,8,0.15)",
+            display: "flex", flexDirection: "column", overflow: "hidden",
+          }}>
               {/* Rooms header */}
               <div style={{ padding: "18px 18px 14px", borderBottom: `1px solid ${B.border}`, flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
@@ -697,21 +718,65 @@ export default function Dashboard() {
                     alreadyIn={draggedPropId ? (roomMeta[room.id]?.propIds || []).includes(draggedPropId) : false}
                     draggingActive={dragging}
                     setRef={el => { roomCardRefs.current[room.id] = el; }}
-                    onOpen={() => {
+                    onOpen={e => {
                       if (room.local) {
                         setShowDbBanner(true);
                         alert("Run 003_complete_schema.sql and 004_join_requests.sql in your Supabase SQL editor to enable rooms.");
                       } else {
-                        nav(`/room/${room.room_code}`);
+                        handleOpenRoom(e, room.room_code, room.name);
                       }
                     }}
                   />
                 ))}
               </div>
-            </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
+
+      {/* ── Room portal transition overlay ───────────────────────────────── */}
+      {roomTransition && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 500, pointerEvents: "none" }}>
+
+          {/* Gold ring that bursts outward from the click point */}
+          <div style={{
+            position: "absolute",
+            left: roomTransition.cx,
+            top:  roomTransition.cy,
+            width: 56, height: 56,
+            borderRadius: "50%",
+            border: "1.5px solid rgba(166,124,61,0.9)",
+            boxShadow: "0 0 24px 6px rgba(166,124,61,0.35)",
+            animation: "portalRingBurst 1.0s cubic-bezier(.2,0,.6,1) both",
+          }} />
+
+          {/* Second, slightly-delayed ring for depth */}
+          <div style={{
+            position: "absolute",
+            left: roomTransition.cx,
+            top:  roomTransition.cy,
+            width: 56, height: 56,
+            borderRadius: "50%",
+            border: "1px solid rgba(166,124,61,0.5)",
+            animation: "portalRingBurst 1.0s cubic-bezier(.2,0,.6,1) 0.08s both",
+          }} />
+
+          {/* Dark overlay expanding from origin */}
+          <div style={{
+            position: "absolute", inset: 0,
+            background: "linear-gradient(160deg, #1C1008 0%, #080503 100%)",
+            transformOrigin: `${roomTransition.cx}px ${roomTransition.cy}px`,
+            animation: "roomPortalExpand 1.05s cubic-bezier(0.65, 0, 0.35, 1) 0.06s both",
+          }} />
+
+          {/* Warm amber glow at the origin point, visible through the overlay */}
+          <div style={{
+            position: "absolute", inset: 0,
+            background: `radial-gradient(circle at ${roomTransition.cx}px ${roomTransition.cy}px, rgba(166,124,61,0.2) 0%, rgba(166,124,61,0.06) 30%, transparent 65%)`,
+            animation: "portalGlowPulse 1.0s ease 0.1s both",
+          }} />
+
+        </div>
+      )}
 
       {/* ── Create Room Modal ─────────────────────────────────────────────── */}
       {showCreateModal && (
@@ -957,18 +1022,49 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
       )}
 
       {/* Room info */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 800, color: B.ink, letterSpacing: 2.5 }}>
-          {room.room_code}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 7, gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          {/* Room name */}
+          <div style={{
+            fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 500,
+            color: B.ink, lineHeight: 1.2, marginBottom: 4,
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {room.name || "Unnamed Room"}
+          </div>
+          {/* Invite code row */}
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{
+              fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, fontWeight: 800,
+              color: B.gold, letterSpacing: 2.5, userSelect: "all",
+            }}>
+              {room.room_code}
+            </span>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(room.room_code);
+              }}
+              title="Copy code"
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: "1px 3px",
+                display: "flex", alignItems: "center", opacity: 0.5,
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={B.gold} strokeWidth="2.2">
+                <rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <button
-          onClick={e => { e.stopPropagation(); onOpen(); }}
+          onClick={e => { e.stopPropagation(); onOpen(e); }}
           style={{
-            display: "flex", alignItems: "center", gap: 4,
-            padding: "4px 10px", borderRadius: 7,
+            display: "flex", alignItems: "center", gap: 4, flexShrink: 0,
+            padding: "5px 11px", borderRadius: 7,
             background: B.goldBg, border: `1px solid ${B.border}`,
             fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, color: B.gold,
-            cursor: "pointer",
+            cursor: "pointer", marginTop: 2,
           }}
         >
           Open <Icon d="M9 18l6-6-6-6" size={10} color={B.gold} sw={2.2} />

@@ -258,7 +258,7 @@ export default function RoomView() {
   );
 
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden" }}>
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden", animation: "roomViewIn 0.8s cubic-bezier(.16,1,.3,1) both" }}>
 
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <header style={{

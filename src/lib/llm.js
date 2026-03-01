@@ -11,8 +11,8 @@ export const isLLMReady = Boolean(API_KEY);
 async function callGemini(prompt, maxTokens = 512) {
   if (!API_KEY) return null;
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(API_KEY)}`;
-    const res = await fetch(url, {
+    // Use same-origin proxy to avoid CORS (key is applied on the server)
+    const res = await fetch(`/api/gemini?model=${encodeURIComponent(MODEL)}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
