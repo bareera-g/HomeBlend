@@ -32,7 +32,9 @@ export default function AddPropertiesDrawer({ roomPropertyIds, savedIds, onAdd, 
             const inRoom = roomPropertyIds.includes(p.id);
             return (
               <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12, background: inRoom ? "rgba(166,124,61,0.07)" : "rgba(255,255,255,0.75)", borderRadius: 11, padding: "11px 13px", border: `1px solid ${inRoom ? B.gold : B.border}` }}>
-                <div style={{ width: 60, height: 48, borderRadius: 7, flexShrink: 0, background: `url(${p.images[0]}) center/cover`, border: `1px solid ${B.border}` }} />
+                <div style={{ width: 60, height: 48, borderRadius: 7, flexShrink: 0, overflow: "hidden", background: "#e8e2d8", border: `1px solid ${B.border}` }}>
+                  {p.images?.[0] && <img src={p.images[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} />}
+                </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, color: B.ink, marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.title}</div>
                   <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>{p.price} · {p.beds}bd</div>

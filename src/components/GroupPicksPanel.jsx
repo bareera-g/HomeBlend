@@ -226,8 +226,15 @@ function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
       <div style={{ display: "flex", alignItems: "stretch" }}>
         {/* Property: hero focus */}
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          <div style={{ position: "relative", height: 110, flexShrink: 0 }}>
-            <img src={property.images?.[0]} alt={property.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+          <div style={{ position: "relative", height: 110, flexShrink: 0, background: "#e8e2d8" }}>
+            {property.images?.[0] && (
+              <img
+                src={property.images[0]}
+                alt={property.title}
+                style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+                onError={e => { e.target.style.display = "none"; }}
+              />
+            )}
             <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(16,10,4,0.6) 0%, transparent 45%)" }} />
             <div style={{
               position: "absolute", top: 8, left: 10, width: 24, height: 24, borderRadius: "50%",

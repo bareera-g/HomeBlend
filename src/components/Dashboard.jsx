@@ -11,6 +11,7 @@ import {
   addPropertyToRoom,
 } from "../lib/firebase.js";
 import { PROPERTIES } from "../data/properties.js";
+import { computeUniquePropertyImages } from "../lib/uniquePropertyImages.js";
 import MapPanel from "./MapPanel.jsx";
 import LoadingScreen from "./LoadingScreen.jsx";
 
@@ -76,6 +77,27 @@ export default function Dashboard() {
   const roomCardRefs    = useRef({});   // roomId → DOM node
   const createNewRoomRef = useRef(null);
   const ghostRef        = useRef(null);
+  const roomsListRef    = useRef(null);   // scrollable rooms list
+  const scrollIntervalRef = useRef(null); // hover-to-scroll interval
+
+  // Hover-to-scroll when dragging a property (find your room in a long list)
+  const startRoomListScroll = useCallback((dir) => {
+    if (scrollIntervalRef.current) return;
+    scrollIntervalRef.current = setInterval(() => {
+      const el = roomsListRef.current;
+      if (el) el.scrollTop += dir * 4;
+    }, 16);
+  }, []);
+  const stopRoomListScroll = useCallback(() => {
+    if (scrollIntervalRef.current) {
+      clearInterval(scrollIntervalRef.current);
+      scrollIntervalRef.current = null;
+    }
+  }, []);
+  useEffect(() => {
+    if (!dragging) stopRoomListScroll();
+    return () => stopRoomListScroll();
+  }, [dragging, stopRoomListScroll]);
 
   // ── Data fetch (with minimum display time for fake progress bar) ──────────
   const MIN_LOADING_MS = 1000;
@@ -142,6 +164,8 @@ export default function Dashboard() {
     else if (sortBy === "largest")    list = [...list].sort((a, b) => b.sqft - a.sqft);
     return list;
   }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
+
+  const uniqueImageUrls = useMemo(() => computeUniquePropertyImages(filtered), [filtered]);
 
   const activeFilters = [
     maxPrice < PRICE_STEPS[PRICE_STEPS.length - 1], minBeds > 0, minBaths > 0,
@@ -233,7 +257,8 @@ export default function Dashboard() {
   }
 
   function resetFilters() {
-    setMaxPrice(5000);
+    setCategory("All");
+    setMaxPrice(7000);
     setMinBeds(0); setMinBaths(0);
     setPetOnly(false); setParkingReq(false); setLaundryReq(false);
     setSortBy("default");
@@ -455,16 +480,6 @@ export default function Dashboard() {
           ))}
         </div>
 
-        {/* Price slider — in header, matching screenshot */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
-            Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
-          </span>
-          <input type="range" min={1000} max={5000} step={100} value={maxPrice}
-            onChange={e => setMaxPrice(+e.target.value)}
-            style={{ accentColor: B.gold, width: 90, cursor: "pointer" }} />
-        </div>
-
         <div style={{ flex: 1 }} />
 
         <div style={{ width: 1, height: 18, background: B.border }} />
@@ -530,21 +545,8 @@ export default function Dashboard() {
         {/* ── Properties panel ──────────────────────────────────────────────── */}
         <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
-          {/* Sub-header: category chips + count */}
+          {/* Sub-header: count + filter toggle */}
           <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
-            {/* Category chips */}
-            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-              {CATEGORIES.map(cat => (
-                <button key={cat} onClick={() => setCategory(cat)} style={{
-                  padding: "3px 9px", borderRadius: 12, border: "none",
-                  background: category === cat ? B.gold : "rgba(166,124,61,0.08)",
-                  color: category === cat ? "#FAF6EE" : B.muted,
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 500,
-                  cursor: "pointer", transition: "all 0.15s",
-                }}>{cat}</button>
-              ))}
-            </div>
-            {/* Count + filter toggle */}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>
                 <strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"}
@@ -570,6 +572,33 @@ export default function Dashboard() {
           {/* Compact filter dropdown (inside properties panel) */}
           {showFilters && (
             <div style={{ padding: "12px 11px 10px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0, animation: "fadeIn 0.18s ease" }}>
+              {/* Category */}
+              <div style={{ marginBottom: 9 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Property type</div>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {CATEGORIES.map(cat => (
+                    <button key={cat} onClick={() => setCategory(cat)} style={{
+                      padding: "3px 9px", borderRadius: 7, border: `1px solid ${category === cat ? B.gold : B.border}`,
+                      background: category === cat ? "rgba(166,124,61,0.1)" : "transparent",
+                      color: category === cat ? B.gold : B.muted,
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: category === cat ? 700 : 400,
+                      cursor: "pointer",
+                    }}>{cat}</button>
+                  ))}
+                </div>
+              </div>
+              {/* Max price */}
+              <div style={{ marginBottom: 9 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Max rent</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
+                    Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
+                  </span>
+                  <input type="range" min={1000} max={7000} step={100} value={Math.min(maxPrice, 7000)}
+                    onChange={e => setMaxPrice(+e.target.value)}
+                    style={{ accentColor: B.gold, flex: 1, minWidth: 0, cursor: "pointer" }} />
+                </div>
+              </div>
               {/* Beds */}
               <div style={{ marginBottom: 9 }}>
                 <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bedrooms</div>
@@ -634,6 +663,7 @@ export default function Dashboard() {
                   isHighlighted={highlightedPropertyId === p.id}
                   onSave={e => toggleSave(p.id, e)}
                   onMouseDown={onCardMouseDown}
+                  primaryImageUrl={uniqueImageUrls[p.id]}
                 />
               </div>
             ))}
@@ -648,6 +678,9 @@ export default function Dashboard() {
             blendData={null}
             selectedProperty={selected}
             onSelect={handleMapPropertySelect}
+            dragging={dragging}
+            draggedPropId={draggedPropId}
+            uniqueImageUrls={uniqueImageUrls}
           />
         </div>
 
@@ -792,8 +825,27 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* Room cards */}
-              <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 24px", display: "flex", flexDirection: "column", gap: 9 }}>
+              {/* Room cards — list with hover-to-scroll when dragging */}
+              <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+                {dragging && rooms.length > 0 && (
+                  <div
+                    onMouseEnter={() => startRoomListScroll(-1)}
+                    onMouseLeave={stopRoomListScroll}
+                    style={{
+                      position: "absolute", left: 0, right: 0, top: 0, height: 32, zIndex: 2,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "linear-gradient(180deg, rgba(251,247,241,0.95) 0%, transparent 100%)",
+                      cursor: "n-resize",
+                    }}
+                    title="Hover to scroll up"
+                  >
+                    <Icon d="M12 19V5M5 12l7-7 7 7" size={14} color={B.gold} sw={2} />
+                  </div>
+                )}
+                <div
+                  ref={roomsListRef}
+                  style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 24px", display: "flex", flexDirection: "column", gap: 9 }}
+                >
                 {rooms.length === 0 ? (
                   <div style={{ padding: "36px 16px", textAlign: "center" }}>
                     <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(166,124,61,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
@@ -823,6 +875,22 @@ export default function Dashboard() {
                     }}
                   />
                 ))}
+                </div>
+                {dragging && rooms.length > 0 && (
+                  <div
+                    onMouseEnter={() => startRoomListScroll(1)}
+                    onMouseLeave={stopRoomListScroll}
+                    style={{
+                      position: "absolute", left: 0, right: 0, bottom: 0, height: 48, zIndex: 2,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: "linear-gradient(0deg, rgba(251,247,241,0.95) 0%, transparent 100%)",
+                      cursor: "s-resize",
+                    }}
+                    title="Hover to scroll down and find your room"
+                  >
+                    <Icon d="M12 5v14M5 12l7 7 7-7" size={16} color={B.gold} sw={2} />
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1024,6 +1092,8 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
     <div
       ref={setRef}
       style={{
+        flexShrink: 0,
+        minHeight: 120,
         borderRadius: 13,
         border: isOver
           ? `2px solid ${B.gold}`
@@ -1042,7 +1112,6 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
         backdropFilter: "blur(10px)",
         padding: "14px 15px",
         paddingBottom: draggingActive ? 22 : 14,
-        minHeight: draggingActive ? 125 : undefined,
         cursor: draggingActive ? "copy" : "pointer",
         transition: "all 0.2s cubic-bezier(.16,1,.3,1)",
         position: "relative",
@@ -1079,9 +1148,14 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
         </div>
       )}
 
+      {/* Room name (user-named) */}
+      <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 16, fontWeight: 600, color: B.ink, marginBottom: 4 }}>
+        {room.name || `Room ${room.room_code}`}
+      </div>
+
       {/* Room info */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 800, color: B.ink, letterSpacing: 2.5 }}>
+        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: B.muted, letterSpacing: 2 }}>
           {room.room_code}
         </div>
         <button
@@ -1139,19 +1213,16 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
 }
 
 /* ── Property Card ─────────────────────────────────────────────────────────── */
-function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMouseDown }) {
+function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMouseDown, primaryImageUrl }) {
   const [hovered,   setHovered]   = useState(false);
   const [imgIdx,    setImgIdx]    = useState(0);
   const [expanded,  setExpanded]  = useState(false);
   const [arrowHov,  setArrowHov]  = useState(null); // "prev" | "next"
-  const totalImgs = property.images.length;
-
-  // Auto-advance gallery — pauses while hovered
-  useEffect(() => {
-    if (totalImgs <= 1 || hovered) return;
-    const t = setInterval(() => setImgIdx(i => (i + 1) % totalImgs), 3800);
-    return () => clearInterval(t);
-  }, [hovered, totalImgs]);
+  const displayImages = useMemo(() => {
+    if (!primaryImageUrl) return property.images;
+    return [primaryImageUrl, ...property.images.filter(u => u !== primaryImageUrl)];
+  }, [property.images, primaryImageUrl]);
+  const totalImgs = displayImages.length;
 
   function goTo(dir, e) {
     e.stopPropagation();
@@ -1192,14 +1263,21 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
       <div style={{ height: IMG_H, flexShrink: 0, position: "relative", overflow: "hidden", background: "#E8DED2" }}>
 
         {/* Slides */}
-        {property.images.map((src, i) => (
-          <img key={i} src={src} alt="" draggable={false} style={{
-            position: "absolute", inset: 0, width: "100%", height: "100%",
-            objectFit: "cover",
-            transition: "opacity 0.5s ease, transform 0.5s ease",
-            opacity: i === imgIdx ? 1 : 0,
-            transform: i === imgIdx ? "scale(1)" : "scale(1.03)",
-          }} />
+        {displayImages.map((src, i) => (
+          <img
+            key={i}
+            src={src}
+            alt=""
+            draggable={false}
+            style={{
+              position: "absolute", inset: 0, width: "100%", height: "100%",
+              objectFit: "cover",
+              transition: "opacity 0.5s ease, transform 0.5s ease",
+              opacity: i === imgIdx ? 1 : 0,
+              transform: i === imgIdx ? "scale(1)" : "scale(1.03)",
+            }}
+            onError={e => { e.target.style.display = "none"; }}
+          />
         ))}
 
         {/* Gradient scrims */}
@@ -1226,7 +1304,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
         }}>{property.category}</div>
 
         {/* ← Prev arrow */}
-        {totalImgs > 1 && hovered && (
+        {totalImgs > 1 && hovered && displayImages.length > 0 && (
           <button
             onMouseDown={e => e.stopPropagation()}
             onClick={e => goTo(-1, e)}
@@ -1279,7 +1357,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
         {/* Dot indicators — bottom center-right */}
         {totalImgs > 1 && (
           <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 5, alignItems: "center" }}>
-            {property.images.map((_, i) => (
+            {displayImages.map((_, i) => (
               <div
                 key={i}
                 onMouseDown={e => e.stopPropagation()}
@@ -1294,16 +1372,6 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
               />
             ))}
           </div>
-        )}
-
-        {/* Auto-play indicator — tiny pulse when auto-sliding */}
-        {totalImgs > 1 && !hovered && (
-          <div style={{
-            position: "absolute", bottom: 12, right: 46,
-            width: 5, height: 5, borderRadius: "50%",
-            background: "rgba(255,255,255,0.5)",
-            animation: "pulse 2s ease infinite",
-          }} />
         )}
 
         {/* Save heart */}
@@ -1422,9 +1490,9 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
         <div style={{ margin: "10px 14px 0" }}>
 
           {/* Photo strip */}
-          {property.images.length > 1 && (
+          {displayImages.length > 1 && (
             <div style={{ display: "flex", gap: 5, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
-              {property.images.map((src, i) => (
+              {displayImages.map((src, i) => (
                 <div key={i} style={{
                   height: 90, minWidth: i === 0 ? 160 : 120,
                   borderRadius: 9, flexShrink: 0,
@@ -1433,7 +1501,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
                   boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
                 }} />
               ))}
-              {property.images.length === 2 && (
+              {displayImages.length === 2 && (
                 <div style={{ height: 90, minWidth: 100, borderRadius: 9, flexShrink: 0, background: "rgba(166,124,61,0.06)", border: `1px dashed rgba(166,124,61,0.25)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
                 </div>

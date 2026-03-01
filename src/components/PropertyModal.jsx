@@ -34,7 +34,7 @@ export default function PropertyModal({ property, myVote, blendScore, blendReaso
     <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 380, background: `linear-gradient(170deg, rgba(252,248,242,0.99) 0%, rgba(246,239,228,0.99) 100%)`, borderLeft: `1px solid ${B.border}`, boxShadow: "-12px 0 48px rgba(40,24,8,0.15)", display: "flex", flexDirection: "column", overflow: "hidden", zIndex: 30, animation: "slideInR 0.2s ease" }}>
       {/* Image */}
       <div style={{ position: "relative", height: 220, flexShrink: 0, background: "#E8E0D5", overflow: "hidden" }}>
-        {property.images.map((src, i) => <img key={i} src={src} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s", opacity: i === imgIdx ? 1 : 0 }} />)}
+        {property.images.map((src, i) => <img key={i} src={src} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s", opacity: i === imgIdx ? 1 : 0 }} onError={e => { e.target.style.display = "none"; }} />)}
         <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, zIndex: 5, width: 32, height: 32, borderRadius: "50%", background: "rgba(20,12,5,0.6)", backdropFilter: "blur(8px)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon d={IC.x} size={14} color="#fff" sw={2} />
         </button>

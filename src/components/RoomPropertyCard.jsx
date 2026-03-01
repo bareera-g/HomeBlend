@@ -45,10 +45,16 @@ export default function RoomPropertyCard({
       {/* ── Photo ── */}
       <div style={{ position: "relative", height: 150, background: "#E8DED2", overflow: "hidden" }}>
         {property.images.map((src, i) => (
-          <img key={i} src={src} alt="" style={{
-            position: "absolute", inset: 0, width: "100%", height: "100%",
-            objectFit: "cover", transition: "opacity 0.3s", opacity: i === imgIdx ? 1 : 0,
-          }} />
+          <img
+            key={i}
+            src={src}
+            alt=""
+            style={{
+              position: "absolute", inset: 0, width: "100%", height: "100%",
+              objectFit: "cover", transition: "opacity 0.3s", opacity: i === imgIdx ? 1 : 0,
+            }}
+            onError={e => { e.target.style.display = "none"; }}
+          />
         ))}
 
         {/* Gradient */}

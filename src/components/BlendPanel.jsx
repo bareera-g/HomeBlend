@@ -270,8 +270,8 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
             <section>
               <SectionLabel>AI Top Pick</SectionLabel>
               <div style={{ borderRadius: 14, overflow: "hidden", border: `1.5px solid ${B.gold}55`, background: "rgba(255,255,255,0.8)" }}>
-                <div style={{ position: "relative", height: 90 }}>
-                  <img src={prop.images?.[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                <div style={{ position: "relative", height: 90, background: "#e8e2d8" }}>
+                  <img src={prop.images?.[0]} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} onError={e => { e.target.style.display = "none"; }} />
                   <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to right, rgba(20,12,5,0.55) 0%, transparent 60%)" }} />
                   <div style={{ position: "absolute", bottom: 10, left: 12 }}>
                     <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, color: B.gold, letterSpacing: 1.8, textTransform: "uppercase" }}>AI Recommends</div>
@@ -352,7 +352,7 @@ function PropertyRow({ property, score, likes, dislikes, rank, highlight }) {
       border: `1px solid ${highlight ? "rgba(166,124,61,0.2)" : B.border}`,
     }}>
       <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, width: 22, textAlign: "right", flexShrink: 0 }}>#{rank + 1}</span>
-      {highlight && <img src={property.images?.[0]} alt="" style={{ width: 52, height: 42, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `1px solid rgba(166,124,61,0.14)` }} />}
+      {highlight && property.images?.[0] && <img src={property.images[0]} alt="" style={{ width: 52, height: 42, objectFit: "cover", borderRadius: 8, flexShrink: 0, border: `1px solid rgba(166,124,61,0.14)` }} onError={e => { e.target.style.display = "none"; }} />}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontFamily: highlight ? "'Cormorant Garamond', serif" : "'DM Sans', sans-serif", fontSize: highlight ? 14 : 11, color: B.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{property.title}</div>
         {highlight && <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.gold, fontWeight: 600, marginTop: 1 }}>{property.price}</div>}
