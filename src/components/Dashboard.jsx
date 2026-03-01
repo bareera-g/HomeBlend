@@ -12,6 +12,7 @@ import {
 } from "../lib/firebase.js";
 import { PROPERTIES } from "../data/properties.js";
 import MapPanel from "./MapPanel.jsx";
+import LoadingScreen from "./LoadingScreen.jsx";
 
 function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
@@ -66,6 +67,7 @@ export default function Dashboard() {
   const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
   const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
   const [highlightedPropertyId, setHighlightedPropertyId] = useState(null);     // map-click → scroll to card & pulse highlight
+  const [showLoader, setShowLoader] = useState(true);   // stays until bar completes after loading done
 
   const CREATE_NEW_ROOM_ID = "__create_new__";
 
@@ -75,9 +77,11 @@ export default function Dashboard() {
   const createNewRoomRef = useRef(null);
   const ghostRef        = useRef(null);
 
-  // ── Data fetch ───────────────────────────────────────────────────────────
+  // ── Data fetch (with minimum display time for fake progress bar) ──────────
+  const MIN_LOADING_MS = 1000;
   useEffect(() => {
     if (!user) return;
+    const start = Date.now();
     async function init() {
       setLoading(true);
       try {
@@ -101,12 +105,23 @@ export default function Dashboard() {
         console.error("[HomeBlend] Init error:", e);
         setDbError(e.message);
         setShowDbBanner(true);
-        // Still set a fallback profile so the UI works
         setProfile({ display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
-      } finally { setLoading(false); }
+      } finally {
+        const elapsed = Date.now() - start;
+        const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
+        setTimeout(() => setLoading(false), remaining);
+      }
     }
     init();
   }, [user]);
+
+  useEffect(() => {
+    if (!loading) {
+      const t = setTimeout(() => setShowLoader(false), 350); // let bar complete to 100%
+      return () => clearTimeout(t);
+    }
+    setShowLoader(true);
+  }, [loading]);
 
   // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
@@ -406,12 +421,8 @@ export default function Dashboard() {
     return () => clearTimeout(t);
   }, [highlightedPropertyId]);
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) return (
-    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: 34, height: 34, borderRadius: "50%", border: `3px solid rgba(166,124,61,0.18)`, borderTopColor: B.gold, animation: "spin 0.7s linear infinite" }} />
-    </div>
-  );
+  // ── Loading (fake progress bar: fast start, slows near end; min 1s display) ─
+  if (showLoader) return <LoadingScreen loading={loading} />;
 
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden" }}>
