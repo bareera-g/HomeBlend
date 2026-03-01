@@ -3,23 +3,24 @@ import { useNavigate } from "react-router-dom";
 import { B, Icon, IC, LogoMark } from "../Brand.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import {
-  signOut, ensureProfile,
+  testConnection,
+  ensureProfile,
   fetchUserRooms, fetchSavedPropertyIds,
   saveProperty, unsaveProperty,
   createRoom, fetchRoom, joinRoom,
   fetchMembers, fetchRoomProperties,
   addPropertyToRoom,
-} from "../lib/supabase.js";
+} from "../lib/firebase.js";
 import { PROPERTIES } from "../data/properties.js";
 import MapPanel from "./MapPanel.jsx";
+import LoadingBar from "./LoadingBar.jsx";
 
-function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
 const IMG_H = 230;
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
-  const { user }  = useAuth();
+  const { user, signOut } = useAuth();
   const nav       = useNavigate();
 
   // ── State ────────────────────────────────────────────────────────────────
@@ -63,32 +64,52 @@ export default function Dashboard() {
   // ── Data fetch ───────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
+    const loadTimeoutMs = 15000;
     async function init() {
       setLoading(true);
+      setDbError(null);
       try {
-        const p = await ensureProfile(user.id, user.email?.split("@")[0]);
-        setProfile(p || { display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
-        const [r, s] = await Promise.all([
-          fetchUserRooms(user.id),
-          fetchSavedPropertyIds(user.id),
-        ]);
-        setRooms(r);
-        setSavedIds(s);
-        if (r.length > 0) {
-          const meta = {};
-          await Promise.all(r.map(async room => {
-            const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
-            meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
-          }));
-          setRoomMeta(meta);
+        const conn = await testConnection();
+        if (!conn.ok) {
+          setDbError(conn.error);
+          setShowDbBanner(true);
+          setProfile({ display_name: user.display_name || "You", avatar_color: "#A67C3D" });
+          setRooms([]);
+          setSavedIds([]);
+          return;
         }
+        const initPromise = (async () => {
+          const p = await ensureProfile(user.id, user.display_name);
+          setProfile(p || { display_name: user.display_name || "You", avatar_color: "#A67C3D" });
+          const [r, s] = await Promise.all([
+            fetchUserRooms(user.id),
+            fetchSavedPropertyIds(user.id),
+          ]);
+          setRooms(r);
+          setSavedIds(s);
+          if (r.length > 0) {
+            const meta = {};
+            await Promise.all(r.map(async room => {
+              const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
+              meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
+            }));
+            setRoomMeta(meta);
+          }
+        })();
+        await Promise.race([
+          initPromise,
+          new Promise((_, rej) => setTimeout(() => rej(new Error("Load timeout")), loadTimeoutMs)),
+        ]);
       } catch (e) {
         console.error("[HomeBlend] Init error:", e);
         setDbError(e.message);
         setShowDbBanner(true);
-        // Still set a fallback profile so the UI works
-        setProfile({ display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
-      } finally { setLoading(false); }
+        setProfile({ display_name: user.display_name || "You", avatar_color: "#A67C3D" });
+        setRooms([]);
+        setSavedIds([]);
+      } finally {
+        setLoading(false);
+      }
     }
     init();
   }, [user]);
@@ -142,9 +163,7 @@ export default function Dashboard() {
     try {
       let room;
       try {
-        room = await createRoom(name, user.id);
-        // Update the owner member row with the real display name (createRoom uses "Owner" as placeholder)
-        await joinRoom(room.id, user.id, profile?.display_name || user.email?.split("@")[0] || "Me", profile?.avatar_color || "#A67C3D");
+        room = await createRoom(name, user.id, profile?.display_name || user.display_name || "Me", profile?.avatar_color || user.avatar_color || "#A67C3D");
       } catch (dbErr) {
         const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         console.warn("[HomeBlend] DB error creating room:", dbErr.message);
@@ -174,10 +193,8 @@ export default function Dashboard() {
   }
 
   function handleOpenRoom(e, code, name) {
-    const cx = e?.clientX ?? window.innerWidth / 2;
-    const cy = e?.clientY ?? window.innerHeight / 2;
-    setRoomTransition({ cx, cy, code, name: name || "Unnamed Room" });
-    setTimeout(() => nav(`/room/${code}`), 950);
+    setRoomTransition({ code, name: name || "Unnamed Room" });
+    setTimeout(() => nav(`/room/${code}`), 320);
   }
 
   function resetFilters() {
@@ -323,16 +340,12 @@ export default function Dashboard() {
     window.addEventListener("mouseup", handleMouseUp);
   }, [handleMouseMove, handleMouseUp]);
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) return (
-    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: 34, height: 34, borderRadius: "50%", border: `3px solid rgba(166,124,61,0.18)`, borderTopColor: B.gold, animation: "spin 0.7s linear infinite" }} />
-    </div>
-  );
-
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden" }}>
-
+      {loading ? (
+        <div style={{ flex: 1, minHeight: 0, background: B.bg }} />
+      ) : (
+        <>
       {/* ── Header ──────────────────────────────────────────────────────────── */}
       <header style={{
         display: "flex", alignItems: "center", gap: 12, height: 54,
@@ -406,7 +419,7 @@ export default function Dashboard() {
           <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink, fontWeight: 500 }}>
             {profile?.display_name}
           </span>
-          <button onClick={async () => { await signOut(); nav("/auth", { replace: true }); }} style={{
+          <button onClick={() => { signOut(); nav("/auth", { replace: true }); }} style={{
             padding: "5px 12px", borderRadius: 7,
             border: `1px solid ${B.border}`, background: "transparent",
             fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted,
@@ -432,15 +445,8 @@ export default function Dashboard() {
               Database not set up.{" "}
             </span>
             <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8C5540" }}>
-              Run{" "}
-              <a href="https://supabase.com/dashboard/project/hawvhqhqftkafbpxwyll/sql/new" target="_blank" rel="noreferrer"
-                style={{ color: "#C0624A", fontWeight: 600, textDecoration: "underline" }}>
-                both SQL migration files
-              </a>{" "}
-              in your Supabase SQL editor:{" "}
-              <code style={{ fontFamily: "monospace", fontSize: 10 }}>003_complete_schema.sql</code>{" "}then{" "}
-              <code style={{ fontFamily: "monospace", fontSize: 10 }}>004_join_requests.sql</code>.
-              {dbError && <span style={{ display: "block", marginTop: 2, fontSize: 10, opacity: 0.8 }}>Error: {dbError}</span>}
+              Ensure Firestore is enabled in Firebase Console → Build → Firestore Database. Deploy <code style={{ background: "rgba(0,0,0,0.06)", padding: "1px 4px", borderRadius: 3 }}>firestore.rules</code> if needed.
+              {dbError && <span style={{ display: "block", marginTop: 4, fontSize: 10, opacity: 0.9 }}>{dbError}</span>}
             </span>
           </div>
           <button
@@ -721,7 +727,7 @@ export default function Dashboard() {
                     onOpen={e => {
                       if (room.local) {
                         setShowDbBanner(true);
-                        alert("Run 003_complete_schema.sql and 004_join_requests.sql in your Supabase SQL editor to enable rooms.");
+                        alert("Database error. Check Firebase setup to enable rooms.");
                       } else {
                         handleOpenRoom(e, room.room_code, room.name);
                       }
@@ -733,49 +739,15 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ── Room portal transition overlay ───────────────────────────────── */}
+      {/* ── Room transition overlay (simple fade) ──────────────────────────── */}
       {roomTransition && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 500, pointerEvents: "none" }}>
-
-          {/* Gold ring that bursts outward from the click point */}
-          <div style={{
-            position: "absolute",
-            left: roomTransition.cx,
-            top:  roomTransition.cy,
-            width: 56, height: 56,
-            borderRadius: "50%",
-            border: "1.5px solid rgba(166,124,61,0.9)",
-            boxShadow: "0 0 24px 6px rgba(166,124,61,0.35)",
-            animation: "portalRingBurst 1.0s cubic-bezier(.2,0,.6,1) both",
-          }} />
-
-          {/* Second, slightly-delayed ring for depth */}
-          <div style={{
-            position: "absolute",
-            left: roomTransition.cx,
-            top:  roomTransition.cy,
-            width: 56, height: 56,
-            borderRadius: "50%",
-            border: "1px solid rgba(166,124,61,0.5)",
-            animation: "portalRingBurst 1.0s cubic-bezier(.2,0,.6,1) 0.08s both",
-          }} />
-
-          {/* Dark overlay expanding from origin */}
-          <div style={{
-            position: "absolute", inset: 0,
-            background: "linear-gradient(160deg, #1C1008 0%, #080503 100%)",
-            transformOrigin: `${roomTransition.cx}px ${roomTransition.cy}px`,
-            animation: "roomPortalExpand 1.05s cubic-bezier(0.65, 0, 0.35, 1) 0.06s both",
-          }} />
-
-          {/* Warm amber glow at the origin point, visible through the overlay */}
-          <div style={{
-            position: "absolute", inset: 0,
-            background: `radial-gradient(circle at ${roomTransition.cx}px ${roomTransition.cy}px, rgba(166,124,61,0.2) 0%, rgba(166,124,61,0.06) 30%, transparent 65%)`,
-            animation: "portalGlowPulse 1.0s ease 0.1s both",
-          }} />
-
-        </div>
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 500, pointerEvents: "none",
+            background: B.bg,
+            animation: "pageFadeOut 0.28s ease both",
+          }}
+        />
       )}
 
       {/* ── Create Room Modal ─────────────────────────────────────────────── */}
@@ -957,6 +929,9 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+        </>
+      )}
+      <LoadingBar loading={loading} />
     </div>
   );
 }

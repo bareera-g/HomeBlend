@@ -12,13 +12,14 @@ import {
   fetchSavedPropertyIds,
   fetchJoinRequests, requestToJoin, respondToJoinRequest,
   subscribeToRoom, unsubscribeFromRoom,
-} from "../lib/supabase.js";
+} from "../lib/firebase.js";
 import MapPanel           from "./MapPanel.jsx";
 import PropertyModal      from "./PropertyModal.jsx";
 import BlendPanel         from "./BlendPanel.jsx";
 import GroupPicksPanel    from "./GroupPicksPanel.jsx";
 import RoomPropertyCard   from "./RoomPropertyCard.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
+import LoadingBar from "./LoadingBar.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function RoomView() {
@@ -60,7 +61,7 @@ export default function RoomView() {
     async function init() {
       setLoading(true);
       try {
-        const p = await ensureProfile(user.id, user.email?.split("@")[0]);
+        const p = await ensureProfile(user.id, user.display_name);
         setProfile(p);
 
         const roomData = await fetchRoom(code);
@@ -79,7 +80,7 @@ export default function RoomView() {
 
         if (alreadyMember || roomData.created_by === user.id) {
           // Full access
-          await joinRoom(roomData.id, user.id, p?.display_name || "Me", p?.avatar_color || "#A67C3D");
+          await joinRoom(roomData.id, user.id, p?.display_name || user.display_name || "Me", p?.avatar_color || user.avatar_color || "#A67C3D");
           const [updatedMembers, rp, v, s, jr] = await Promise.all([
             fetchMembers(roomData.id),
             fetchRoomProperties(roomData.id),
@@ -162,13 +163,13 @@ export default function RoomView() {
     if (!room || !user) return;
     setRequestSent(true);
     try {
-      await requestToJoin(room.id, user.id, profile?.display_name || user.email?.split("@")[0]);
+      await requestToJoin(room.id, user.id, profile?.display_name || user.display_name);
     } catch { setRequestSent(false); }
   }
 
   async function handleRespondToRequest(requestId, accept) {
     try {
-      await respondToJoinRequest(requestId, accept, room.id);
+      await respondToJoinRequest(room.id, requestId, accept);
       const jr = await fetchJoinRequests(room.id).catch(() => []);
       setJoinRequests(jr);
       if (accept) {
@@ -185,16 +186,7 @@ export default function RoomView() {
     });
   }
 
-  // ── Loading / error ──────────────────────────────────────────────────────
-  if (loading) return (
-    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-        <div style={{ width: 36, height: 36, borderRadius: "50%", border: `3px solid rgba(166,124,61,0.2)`, borderTopColor: B.gold, animation: "spin 0.7s linear infinite" }} />
-        <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted }}>Joining room {code}…</p>
-      </div>
-    </div>
-  );
-
+  // ── Error ────────────────────────────────────────────────────────────────
   if (error) return (
     <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ textAlign: "center" }}>
@@ -204,6 +196,14 @@ export default function RoomView() {
           Back to Dashboard
         </button>
       </div>
+    </div>
+  );
+
+  // ── Loading (show bar, placeholder for content) ───────────────────────────
+  if (loading) return (
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg }}>
+      <div style={{ flex: 1, minHeight: 0 }} />
+      <LoadingBar loading={true} />
     </div>
   );
 
@@ -257,9 +257,16 @@ export default function RoomView() {
     </div>
   );
 
-  return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden", animation: "roomViewIn 0.8s cubic-bezier(.16,1,.3,1) both" }}>
+  // ── Loading ─────────────────────────────────────────────────────────────
+  if (loading) return (
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg }}>
+      <div style={{ flex: 1, minHeight: 0 }} />
+      <LoadingBar loading={true} />
+    </div>
+  );
 
+  return (
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden", animation: "pageFadeIn 0.35s ease both" }}>
       {/* ── Header ───────────────────────────────────────────────────────── */}
       <header style={{
         display: "flex", alignItems: "center", height: 54,

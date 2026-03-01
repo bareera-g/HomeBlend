@@ -4,12 +4,13 @@ import AuthPage  from "./components/AuthPage.jsx";
 import Dashboard from "./components/Dashboard.jsx";
 import RoomView  from "./components/RoomView.jsx";
 import { B } from "./Brand.jsx";
+import LoadingBar from "./components/LoadingBar.jsx";
 
 function ProtectedRoute({ element }) {
   const { user, loading } = useAuth();
   if (loading) return (
-    <div style={{ height: "100dvh", background: B.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ width: 32, height: 32, borderRadius: "50%", border: `3px solid rgba(166,124,61,0.2)`, borderTopColor: B.gold, animation: "spin 0.7s linear infinite" }} />
+    <div style={{ height: "100dvh", background: B.bg }}>
+      <LoadingBar loading={true} />
     </div>
   );
   if (!user) return <Navigate to="/auth" replace />;

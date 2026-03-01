@@ -33,24 +33,12 @@ button { -webkit-tap-highlight-color: transparent; }
 @keyframes pop       { 0% { transform: scale(0.9); opacity: 0; } 60% { transform: scale(1.04); } 100% { transform: scale(1); opacity: 1; } }
 @keyframes shimmer   { 0% { background-position: -300px 0; } 100% { background-position: 300px 0; } }
 
-/* ── Room portal transition ── */
-@keyframes roomPortalExpand {
-  0%   { transform: scale(0);    opacity: 0; }
-  6%   { opacity: 1; }
-  100% { transform: scale(1);    opacity: 1; }
+/* ── Page transition (simple fade) ── */
+@keyframes pageFadeOut {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
-@keyframes portalRingBurst {
-  0%   { transform: translate(-50%, -50%) scale(0.3); opacity: 0; }
-  20%  { opacity: 1; }
-  100% { transform: translate(-50%, -50%) scale(9);   opacity: 0; }
-}
-@keyframes portalGlowPulse {
-  0%   { opacity: 0; }
-  40%  { opacity: 1; }
-  100% { opacity: 0.6; }
-}
-/* RoomView mount */
-@keyframes roomViewIn {
-  0%   { opacity: 0; transform: scale(1.035); }
-  100% { opacity: 1; transform: scale(1); }
+@keyframes pageFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
