@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import {
   useBlends,
@@ -1155,9 +1155,17 @@ function BlendDetail({
 export default function Blend() {
   const { user, authLoading } = useAuth();
   const { blends, loading, reload } = useBlends();
+  const { blendId } = useParams<{ blendId?: string }>();
 
   const [view,        setView]        = useState<View>("list");
   const [activeBlend, setActiveBlend] = useState<BlendWithDetails | null>(null);
+
+  // When blendId param is present, auto-open that blend's detail view
+  useEffect(() => {
+    if (!blendId || loading) return;
+    const found = blends.find((b) => b.id === blendId);
+    if (found) { setActiveBlend(found); setView("detail"); }
+  }, [blendId, blends, loading]);
 
   // Create blend modal
   const [showCreate,   setShowCreate]   = useState(false);

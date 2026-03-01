@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useProperties } from "../hooks/useProperties";
 import { useBlends, addPropertyToBlend } from "../hooks/useBlends";
 import { useAuth } from "../context/AuthContext";
@@ -19,6 +19,7 @@ function deriveType(name: string, raw: Record<string, unknown>): string {
 }
 
 export default function Home() {
+  const navigate = useNavigate();
   const { properties, loading, error } = useProperties();
   const { user, authLoading, signOut, openAuthModal } = useAuth();
   const { blends, loading: blendsLoading } = useBlends();
@@ -34,9 +35,11 @@ export default function Home() {
   const [roomsLoading, setRoomsLoading] = useState(false);
 
   // Drag-and-drop state
-  const [dragPropertyId,  setDragPropertyId]  = useState<string | null>(null);
-  const [dragOverBlendId, setDragOverBlendId] = useState<string | null>(null);
-  const [dropSuccessId,   setDropSuccessId]   = useState<string | null>(null); // blend that just received a drop
+  const [dragPropertyId,    setDragPropertyId]    = useState<string | null>(null);
+  const [dragOverBlendId,   setDragOverBlendId]   = useState<string | null>(null);
+  const [dropSuccessId,     setDropSuccessId]     = useState<string | null>(null);
+  const [dragOverNewBlend,  setDragOverNewBlend]  = useState(false);
+  const [creatingFromDrop,  setCreatingFromDrop]  = useState(false);
 
   const cardsRef = useRef<HTMLDivElement>(null);
   const [blendPropertyId, setBlendPropertyId] = useState<string | null>(null);
@@ -99,6 +102,26 @@ export default function Home() {
       setTimeout(() => { setDropSuccessId(null); setSavedOpen(false); }, 1400);
     }
     setDragPropertyId(null);
+  }
+
+  async function handleDropCreateBlend() {
+    if (!dragPropertyId || !user) return;
+    setDragOverNewBlend(false);
+    setCreatingFromDrop(true);
+    const propName = properties.find((p) => p.id === dragPropertyId)?.name ?? "New Room";
+    const roomName = `${propName.split(" ").slice(0, 2).join(" ")} Room`;
+    const { createBlend: cb } = await import("../hooks/useBlends");
+    const { id: newBlendId, error: createErr } = await cb(roomName);
+    if (!createErr && newBlendId) {
+      await addPropertyToBlend(newBlendId, dragPropertyId, user.id);
+      setCreatingFromDrop(false);
+      setDragPropertyId(null);
+      setSavedOpen(false);
+      navigate(`/blend/${newBlendId}`);
+    } else {
+      setCreatingFromDrop(false);
+      setDragPropertyId(null);
+    }
   }
 
   async function handleCreateRoom() {
@@ -431,6 +454,37 @@ export default function Home() {
 
               {/* ── Room list ── */}
               <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+
+                {/* ── Create-new-room drop zone — only visible while dragging a property ── */}
+                {(dragPropertyId || creatingFromDrop) && (
+                  <div
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDragOverNewBlend(true); }}
+                    onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverNewBlend(false); }}
+                    onDrop={(e) => { e.preventDefault(); handleDropCreateBlend(); }}
+                    className={`
+                      rounded-2xl border-2 border-dashed flex items-center justify-center gap-2.5
+                      transition-all duration-150 select-none
+                      ${creatingFromDrop
+                        ? "h-16 border-[#A67C52] bg-[#f5e4c8]"
+                        : dragOverNewBlend
+                          ? "h-20 border-[#A67C52] bg-[#f5e4c8] scale-[1.02] shadow-md"
+                          : "h-16 border-[#d4c4ae] bg-white/60 hover:border-[#A67C52] hover:bg-[#f5e4c8]"
+                      }
+                    `}
+                  >
+                    {creatingFromDrop ? (
+                      <span className="w-4 h-4 rounded-full border-2 border-[#A67C52] border-t-transparent animate-spin" />
+                    ) : (
+                      <>
+                        <span className={`text-lg font-light leading-none ${dragOverNewBlend ? "text-[#A67C52]" : "text-stone-400"}`}>+</span>
+                        <span className={`text-[12px] font-medium ${dragOverNewBlend ? "text-[#A67C52]" : "text-stone-400"}`}>
+                          {dragOverNewBlend ? "Drop to create new room" : "Drop here to create new room"}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+
                 {blendsLoading ? (
                   [...Array(2)].map((_, i) => (
                     <div key={i} className="h-40 rounded-2xl bg-[#f0dfc0] animate-pulse" />
@@ -451,14 +505,17 @@ export default function Home() {
                     return (
                       <div
                         key={blend.id}
+                        onClick={() => { if (!dragPropertyId) { setSavedOpen(false); navigate(`/blend/${blend.id}`); } }}
                         onDragOver={dragPropertyId ? (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDragOverBlendId(blend.id); } : undefined}
                         onDragLeave={dragPropertyId ? (e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOverBlendId(null); } : undefined}
                         onDrop={dragPropertyId ? (e) => { e.preventDefault(); handleDropOnBlend(blend.id); } : undefined}
                         className={`bg-white rounded-2xl p-4 transition-all duration-150 ${
+                          dragPropertyId ? "" : "cursor-pointer"
+                        } ${
                           isSuccess ? "ring-2 ring-emerald-400 scale-[1.01]"
                           : isOver  ? "ring-2 ring-[#A67C52] scale-[1.01] shadow-lg"
                           : dragPropertyId ? "ring-2 ring-dashed ring-[#d4c4ae]"
-                          : "shadow-sm hover:shadow-md"
+                          : "shadow-sm hover:shadow-md hover:ring-1 hover:ring-[#e8d5b7]"
                         }`}
                       >
                         {/* Room header row */}
@@ -470,13 +527,9 @@ export default function Home() {
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-2">
-                              <Link
-                                to="/blend"
-                                onClick={() => setSavedOpen(false)}
-                                className="font-bold text-stone-900 text-[15px] uppercase tracking-wide hover:text-[#A67C52] transition-colors truncate"
-                              >
+                              <span className="font-bold text-stone-900 text-[15px] uppercase tracking-wide truncate">
                                 {blend.name}
-                              </Link>
+                              </span>
                               {isSuccess ? (
                                 <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-600 uppercase tracking-wide shrink-0">Added!</span>
                               ) : (

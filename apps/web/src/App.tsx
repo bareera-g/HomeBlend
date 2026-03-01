@@ -22,6 +22,7 @@ export default function App() {
       <Routes>
         <Route path="/"                   element={<Home />} />
         <Route path="/blend"              element={<Blend />} />
+        <Route path="/blend/:blendId"     element={<Blend />} />
         <Route path="/session"            element={<Landing />} />
         <Route path="/host/create"        element={<HostCreate />} />
         <Route path="/host/constraints"   element={<HostConstraints />} />
