@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { PROPERTIES } from "../data/properties.js";
 import { B, Icon, IC, LogoMark } from "../Brand.jsx";
@@ -6,26 +6,97 @@ import { useAuth } from "../lib/auth.jsx";
 import {
   fetchRoom,
   ensureProfile,
-  fetchMembers, joinRoom,
+  fetchMembers, joinRoom, leaveRoom,
   fetchRoomProperties, addPropertyToRoom, removePropertyFromRoom,
   fetchVotes, recordVote,
   fetchSavedPropertyIds,
   fetchJoinRequests, requestToJoin, respondToJoinRequest,
   subscribeToRoom, unsubscribeFromRoom,
+  renameRoom, removeMember, deleteRoom,
 } from "../lib/firebase.js";
 import MapPanel           from "./MapPanel.jsx";
 import PropertyModal      from "./PropertyModal.jsx";
 import BlendPanel         from "./BlendPanel.jsx";
 import GroupPicksPanel    from "./GroupPicksPanel.jsx";
-import RoomPropertyCard   from "./RoomPropertyCard.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
-import LoadingScreen from "./LoadingScreen.jsx";
+import LoadingScreen      from "./LoadingScreen.jsx";
+import { RoomViewSkeleton } from "./Skeleton.jsx";
+import MemberAvatars      from "./MemberAvatars.jsx";
+
+import JoinGate           from "./JoinGate.jsx";
+import JoinRequestsPanel  from "./JoinRequestsPanel.jsx";
+import LeaderboardList    from "./LeaderboardList.jsx";
+
+function pluralize(n, one, many) { return n === 1 ? one : many; }
+
+const ROOM_BG = "linear-gradient(165deg, #E8DED0 0%, #DFD4C4 45%, #D9CDBD 100%)";
+
+/* ── Init helpers (extracted to keep component cognitive-complexity low) ── */
+
+async function loadFullAccess(roomData, user, profile) {
+  await joinRoom(
+    roomData.id, user.id,
+    profile?.display_name || user.display_name || "Me",
+    profile?.avatar_color || user.avatar_color || "#A67C3D",
+  );
+  const [members, rp, votes, savedIds, joinRequests] = await Promise.all([
+    fetchMembers(roomData.id),
+    fetchRoomProperties(roomData.id),
+    fetchVotes(roomData.id),
+    fetchSavedPropertyIds(user.id),
+    fetchJoinRequests(roomData.id).catch(() => []),
+  ]);
+  return { members, rp, votes, savedIds, joinRequests };
+}
+
+async function loadGuestView(roomData, userId) {
+  const jr = await fetchJoinRequests(roomData.id).catch(() => []);
+  const myReq = jr.find(r => r.user_id === userId);
+  return { joinRequests: jr, requestSent: myReq?.status === "pending" };
+}
+
+async function initRoom(code, user, s) {
+  s.setLoading(true);
+  try {
+    const p = await ensureProfile(user.id, user.display_name);
+    s.setProfile(p);
+
+    const roomData = await fetchRoom(code);
+    if (!roomData) {
+      s.setError("Room not found. Check the room code and try again.");
+      s.setLoading(false);
+      return;
+    }
+    s.setRoom(roomData);
+
+    const m = await fetchMembers(roomData.id);
+    const alreadyMember = m.some(mem => mem.auth_user_id === user.id);
+    s.setMembers(m);
+    s.setIsMember(alreadyMember);
+
+    if (alreadyMember || roomData.created_by === user.id) {
+      const full = await loadFullAccess(roomData, user, p);
+      s.setMembers(full.members);
+      s.setIsMember(true);
+      s.setRoomPropMeta(full.rp);
+      s.setRoomPropIds(full.rp.map(r => r.property_id));
+      s.setVotes(full.votes);
+      s.setSavedIds(full.savedIds);
+      s.setJoinRequests(full.joinRequests);
+    } else {
+      const guest = await loadGuestView(roomData, user.id);
+      s.setJoinRequests(guest.joinRequests);
+      s.setRequestSent(!!guest.requestSent);
+    }
+  } catch (e) { s.setError(e.message); }
+  finally { s.setLoading(false); }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function RoomView() {
   const { roomCode } = useParams();
   const nav = useNavigate();
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const code = roomCode?.toUpperCase() ?? "";
 
   const [room,          setRoom]         = useState(null);
@@ -45,68 +116,53 @@ export default function RoomView() {
   const [joinRequests,  setJoinRequests]  = useState([]);
   const [isMember,      setIsMember]      = useState(false);
   const [requestSent,   setRequestSent]   = useState(false);
+  // Room rename
+  const [editingName,    setEditingName]    = useState(false);
+  const [editNameValue,  setEditNameValue]  = useState("");
+  // Member management
+  const [showMemberMenu, setShowMemberMenu] = useState(false);
+  const memberMenuRef = useRef(null);
+  // Settings gear
+  const [showSettings, setShowSettings] = useState(false);
+  const settingsRef = useRef(null);
+  // Profile menu
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const profileMenuRef = useRef(null);
 
-  const roomBg = "linear-gradient(165deg, #E8DED0 0%, #DFD4C4 45%, #D9CDBD 100%)";
-  const roomProperties = PROPERTIES.filter(p => roomPropIds.includes(p.id));
-  const myVotes = {};
-  votes.filter(v => v.user_id === user?.id).forEach(v => { myVotes[v.property_id] = v.vote; });
-  const votesFor = propId => votes.filter(v => v.property_id === propId);
-  const totalVotes = votes.length;
-  const voterCount = new Set(votes.map(v => v.user_id)).size;
-  const voteProgress = members.length > 0 ? Math.round((voterCount / members.length) * 100) : 0;
-  const isOwner = room?.created_by === user?.id;
+  /* ── Memoized derived data ──────────────────────────────────────────────── */
+  const roomPropIdSet = useMemo(() => new Set(roomPropIds), [roomPropIds]);
+  const roomProperties = useMemo(() => PROPERTIES.filter(p => roomPropIdSet.has(p.id)), [roomPropIdSet]);
+
+  const votesByProperty = useMemo(() => {
+    const map = {};
+    for (const v of votes) {
+      map[v.property_id] ??= [];
+      map[v.property_id].push(v);
+    }
+    return map;
+  }, [votes]);
+
+  const myVotes = useMemo(() => {
+    const map = {};
+    for (const v of votes) {
+      if (v.user_id === user?.id) map[v.property_id] = v.vote;
+    }
+    return map;
+  }, [votes, user?.id]);
+
+  const pendingRequests = useMemo(() => joinRequests.filter(r => r.status === "pending"), [joinRequests]);
+  const totalVotes      = votes.length;
+  const isOwner         = room?.created_by === user?.id;
 
   // ── Load room ────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return;
-    async function init() {
-      setLoading(true);
-      try {
-        const p = await ensureProfile(user.id, user.display_name);
-        setProfile(p);
-
-        const roomData = await fetchRoom(code);
-        if (!roomData) {
-          setError("Room not found. Check the room code and try again.");
-          setLoading(false);
-          return;
-        }
-        setRoom(roomData);
-
-        // Check if user is already a member
-        const m = await fetchMembers(roomData.id);
-        const alreadyMember = m.some(mem => mem.auth_user_id === user.id);
-        setMembers(m);
-        setIsMember(alreadyMember);
-
-        if (alreadyMember || roomData.created_by === user.id) {
-          // Full access
-          await joinRoom(roomData.id, user.id, p?.display_name || user.display_name || "Me", p?.avatar_color || user.avatar_color || "#A67C3D");
-          const [updatedMembers, rp, v, s, jr] = await Promise.all([
-            fetchMembers(roomData.id),
-            fetchRoomProperties(roomData.id),
-            fetchVotes(roomData.id),
-            fetchSavedPropertyIds(user.id),
-            fetchJoinRequests(roomData.id).catch(() => []),
-          ]);
-          setMembers(updatedMembers);
-          setIsMember(true);
-          setRoomPropMeta(rp);
-          setRoomPropIds(rp.map(r => r.property_id));
-          setVotes(v);
-          setSavedIds(s);
-          setJoinRequests(jr);
-        } else {
-          // Not a member — show join request flow
-          const jr = await fetchJoinRequests(roomData.id).catch(() => []);
-          const myReq = jr.find(r => r.user_id === user.id);
-          setJoinRequests(jr);
-          setRequestSent(myReq?.status === "pending");
-        }
-      } catch (e) { setError(e.message); }
-      finally { setLoading(false); }
-    }
-    init();
+    initRoom(code, user, {
+      setProfile, setRoom, setMembers, setIsMember,
+      setRoomPropMeta, setRoomPropIds, setVotes,
+      setSavedIds, setJoinRequests, setRequestSent,
+      setError, setLoading,
+    });
   }, [user, code]);
 
   // ── Realtime subscriptions ───────────────────────────────────────────────
@@ -124,13 +180,24 @@ export default function RoomView() {
     return () => unsubscribeFromRoom(channel);
   }, [room?.id, isMember]);
 
+  // ── Close member menu on outside click ────────────────────────────────────
+  useEffect(() => {
+    const handler = (e) => {
+      if (memberMenuRef.current && !memberMenuRef.current.contains(e.target)) setShowMemberMenu(false);
+      if (settingsRef.current && !settingsRef.current.contains(e.target)) setShowSettings(false);
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) setShowProfileMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
   // ── Handlers ─────────────────────────────────────────────────────────────
   const handleAddProperty = useCallback(async (propertyId) => {
     if (!room) return;
     const pid = Number(propertyId);
     // Optimistic update first — instant UI
     setRoomPropIds(prev => prev.includes(pid) ? prev : [...prev, pid]);
-    setRoomPropMeta(prev => prev.find(r => r.property_id === pid)
+    setRoomPropMeta(prev => prev.some(r => r.property_id === pid)
       ? prev : [...prev, { property_id: pid, added_by: user.id }]);
     try {
       await addPropertyToRoom(room.id, pid, user.id);
@@ -180,6 +247,10 @@ export default function RoomView() {
     } catch (e) { console.error(e); }
   }
 
+  const toggleSelect = useCallback((p) => {
+    setSelected(prev => prev?.id === p.id ? null : p);
+  }, []);
+
   function copyCode() {
     navigator.clipboard?.writeText(code).then(() => {
       setCopied(true);
@@ -189,7 +260,7 @@ export default function RoomView() {
 
   // ── Error ────────────────────────────────────────────────────────────────
   if (error) return (
-    <div style={{ height: "100dvh", background: roomBg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div style={{ height: "100dvh", background: ROOM_BG, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div style={{ textAlign: "center" }}>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 28, color: B.ink, marginBottom: 10 }}>Something went wrong</div>
         <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.muted, marginBottom: 22 }}>{error}</div>
@@ -201,60 +272,22 @@ export default function RoomView() {
   );
 
   // ── Loading ─────────────────────────────────────────────────────────────
-  if (loading) return <LoadingScreen loading={true} />;
+  if (loading) return <RoomViewSkeleton />;
 
   // ── Join-request gate ────────────────────────────────────────────────────
-  if (!isMember && !isOwner) return (
-    <div style={{ height: "100dvh", background: roomBg, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-      <div style={{
-        maxWidth: 420, width: "100%",
-        background: "rgba(255,255,255,0.85)", backdropFilter: "blur(20px)",
-        borderRadius: 20, border: `1px solid ${B.border}`,
-        boxShadow: "0 16px 60px rgba(40,24,8,0.12)",
-        padding: "40px 36px", textAlign: "center",
-      }}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-          <LogoMark size={44} />
-        </div>
-        <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 30, color: B.ink, marginBottom: 6 }}>
-          Room <strong style={{ fontWeight: 500, letterSpacing: 2 }}>{code}</strong>
-        </div>
-        <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, color: B.muted, lineHeight: 1.7, marginBottom: 28 }}>
-          This room requires approval from the owner. Request access to join the group and view/vote on properties.
-        </p>
-        {requestSent ? (
-          <div style={{
-            padding: "14px 20px", borderRadius: 12,
-            background: "rgba(92,138,107,0.1)", border: "1px solid rgba(92,138,107,0.25)",
-          }}>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, color: "#5C8A6B" }}>Request sent</div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, marginTop: 4 }}>
-              The room owner will approve your request.
-            </div>
-          </div>
-        ) : (
-          <button onClick={handleRequestJoin} style={{
-            width: "100%", padding: "13px 20px", borderRadius: 11,
-            background: B.ink, border: "none", color: "#FAF6EE",
-            fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
-            cursor: "pointer", boxShadow: "0 4px 20px rgba(44,26,14,0.2)",
-          }}>
-            Request to Join
-          </button>
-        )}
-        <button onClick={() => nav("/dashboard")} style={{
-          marginTop: 14, width: "100%", padding: "10px", borderRadius: 9,
-          background: "transparent", border: `1px solid ${B.border}`,
-          fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, cursor: "pointer",
-        }}>
-          Back to Dashboard
-        </button>
-      </div>
-    </div>
-  );
+  if (!isMember && !isOwner) {
+    return (
+      <JoinGate
+        code={code}
+        requestSent={requestSent}
+        onRequestJoin={handleRequestJoin}
+        onBack={() => nav("/dashboard")}
+      />
+    );
+  }
 
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: roomBg, overflow: "hidden", animation: "pageFadeIn 0.35s ease both" }}>
+    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: ROOM_BG, overflow: "hidden", animation: "pageFadeIn 0.35s ease both" }}>
       {/* ── Room header (distinct from Dashboard) ───────────────────────────── */}
       <header style={{
         display: "flex", flexDirection: "column", flexShrink: 0, zIndex: 50,
@@ -262,7 +295,7 @@ export default function RoomView() {
         borderRadius: "0 0 20px 20px", boxShadow: "0 4px 20px rgba(44,26,14,0.08)",
         borderBottom: "none",
       }}>
-        {/* Top row: Back + Logo + Room code */}
+        {/* Top row: Back + Logo + Room code + Profile avatar */}
         <div style={{ display: "flex", alignItems: "center", padding: "12px 20px 10px", gap: 14 }}>
           <button onClick={() => nav("/dashboard")} style={{
             display: "flex", alignItems: "center", gap: 5,
@@ -282,71 +315,221 @@ export default function RoomView() {
 
           <div style={{ flex: 1 }} />
 
-          <button onClick={copyCode} style={{
-            display: "flex", alignItems: "center", gap: 6,
-            background: copied ? "rgba(74,124,89,0.12)" : B.goldBg,
-            border: `1.5px solid ${copied ? "rgba(74,124,89,0.35)" : B.border}`,
-            borderRadius: 10, padding: "7px 14px", cursor: "pointer", transition: "all 0.2s",
-          }}>
-            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 800, color: copied ? "#4A7C59" : B.ink, letterSpacing: 2 }}>{code}</span>
-            {copied
-              ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A7C59" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
-              : <Icon d={IC.copy} size={12} color={B.muted} sw={1.8} />
-            }
-          </button>
-          {copied && <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#4A7C59", fontWeight: 600, animation: "fadeIn 0.15s ease" }}>Copied!</span>}
+          {/* Profile avatar with dropdown */}
+          <div ref={profileMenuRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => setShowProfileMenu(v => !v)}
+              onMouseEnter={e => { if (!showProfileMenu) e.currentTarget.style.boxShadow = "0 2px 12px rgba(44,26,14,0.18)"; }}
+              onMouseLeave={e => { if (!showProfileMenu) e.currentTarget.style.boxShadow = "0 2px 8px rgba(44,26,14,0.1)"; }}
+              style={{
+                width: 32, height: 32, borderRadius: "50%", flexShrink: 0,
+                background: profile?.avatar_color || user?.avatar_color || B.gold,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: 13, fontWeight: 700, color: "#fff", fontFamily: "'DM Sans', sans-serif",
+                border: showProfileMenu ? `2px solid ${B.gold}` : "2px solid transparent",
+                boxShadow: "0 2px 8px rgba(44,26,14,0.1)",
+                cursor: "pointer", transition: "border-color 0.15s, box-shadow 0.15s",
+              }}
+              title={profile?.display_name || user?.display_name}
+            >
+              {(profile?.display_name || user?.display_name || "?")[0].toUpperCase()}
+            </button>
+            {showProfileMenu && (
+              <div style={{
+                position: "absolute", top: 40, right: 0, width: 200, zIndex: 100,
+                background: "#fff", borderRadius: 14,
+                boxShadow: "0 12px 40px rgba(20,12,5,0.18)",
+                border: `1px solid ${B.border}`,
+                padding: "6px 0", animation: "fadeIn 0.14s ease",
+              }}>
+                <div style={{ padding: "8px 16px 8px", borderBottom: `1px solid ${B.border}` }}>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, color: B.ink }}>{profile?.display_name || user?.display_name}</div>
+                </div>
+                <button
+                  onClick={async () => { setShowProfileMenu(false); await signOut(); nav("/auth", { replace: true }); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 7,
+                    width: "100%", padding: "9px 16px", border: "none",
+                    background: "transparent", cursor: "pointer",
+                    fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#C0624A",
+                    textAlign: "left",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "rgba(192,98,74,0.06)"}
+                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                  Sign out
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
-        {/* Room name hero + meta row */}
+        {/* Room name hero + gear + meta row */}
         <div style={{ padding: "6px 20px 16px", display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div>
-            <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 500, color: B.ink, letterSpacing: 0.3, margin: 0, lineHeight: 1.2 }}>
-              {room?.name || "Room"}
-            </h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            {editingName ? (
+              <form onSubmit={async (e) => { e.preventDefault(); if (editNameValue.trim()) { await renameRoom(room.id, editNameValue.trim()); setRoom(r => ({ ...r, name: editNameValue.trim() })); } setEditingName(false); }} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input autoFocus value={editNameValue} onChange={e => setEditNameValue(e.target.value)}
+                  onBlur={async () => { if (editNameValue.trim() && editNameValue.trim() !== room?.name) { await renameRoom(room.id, editNameValue.trim()); setRoom(r => ({ ...r, name: editNameValue.trim() })); } setEditingName(false); }}
+                  style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 500, color: B.ink, letterSpacing: 0.3, margin: 0, lineHeight: 1.2, border: "none", borderBottom: `2px solid ${B.gold}`, outline: "none", background: "transparent", padding: "0 2px", width: Math.max(120, editNameValue.length * 14) }}
+                />
+              </form>
+            ) : (
+              <h1 onClick={() => { if (isOwner) { setEditNameValue(room?.name || ""); setEditingName(true); } }}
+                style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 500, color: B.ink, letterSpacing: 0.3, margin: 0, lineHeight: 1.2, cursor: isOwner ? "pointer" : "default", display: "flex", alignItems: "center", gap: 6 }}>
+                {room?.name || "Room"}
+                {isOwner && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" style={{ opacity: 0.5 }}><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>}
+              </h1>
+            )}
+            {/* Settings gear — right of room name */}
+            <div ref={settingsRef} style={{ position: "relative" }}>
+              <button onClick={() => setShowSettings(v => !v)} style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: 28, height: 28, borderRadius: 8, border: "none",
+                background: showSettings ? "rgba(166,124,61,0.12)" : "transparent",
+                cursor: "pointer", transition: "background 0.15s",
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
+                </svg>
+              </button>
+              {showSettings && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 100,
+                  width: 200, background: "#fff", borderRadius: 10,
+                  border: `1px solid ${B.border}`, boxShadow: "0 8px 24px rgba(44,26,14,0.12)",
+                  padding: "6px 0", animation: "fadeIn 0.12s ease",
+                }}>
+                  <div style={{ padding: "4px 12px 6px", fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Room Settings</div>
+                  {/* Leave room (non-owner) */}
+                  {!isOwner && (
+                    <button onClick={async () => {
+                      if (!confirm("Leave this room? You can rejoin later with the room code.")) return;
+                      setShowSettings(false);
+                      await leaveRoom(room.id, user.id);
+                      nav("/dashboard");
+                    }} style={{
+                      display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px",
+                      border: "none", background: "transparent", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#C0624A", textAlign: "left",
+                      transition: "background 0.1s",
+                    }} onMouseEnter={e => e.currentTarget.style.background = "rgba(192,98,74,0.06)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C0624A" strokeWidth="1.8" strokeLinecap="round"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                      Leave Room
+                    </button>
+                  )}
+                  {/* Delete room (owner only) */}
+                  {isOwner && (
+                    <>
+                      <div style={{ height: 1, background: B.border, margin: "4px 0" }} />
+                      <button onClick={async () => {
+                        if (!confirm("Delete this room? This cannot be undone. All members, properties, and votes will be removed.")) return;
+                        setShowSettings(false);
+                        await deleteRoom(room.id);
+                        nav("/dashboard");
+                      }} style={{
+                        display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 12px",
+                        border: "none", background: "transparent", cursor: "pointer", fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#C0624A", fontWeight: 600, textAlign: "left",
+                        transition: "background 0.1s",
+                      }} onMouseEnter={e => e.currentTarget.style.background = "rgba(192,98,74,0.06)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#C0624A" strokeWidth="1.8" strokeLinecap="round"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        Delete Room
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+            </div>
             <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 4 }}>
-              {members.length} member{members.length !== 1 ? "s" : ""} · {roomProperties.length} propert{roomProperties.length === 1 ? "y" : "ies"}
+              {members.length} {pluralize(members.length, "member", "members")} · {roomProperties.length} {pluralize(roomProperties.length, "property", "properties")}
             </div>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            {isOwner && joinRequests.filter(r => r.status === "pending").length > 0 && (
+            {isOwner && pendingRequests.length > 0 && (
               <button onClick={() => setRightTab("requests")} style={{
                 display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 10,
                 background: "rgba(192,98,74,0.1)", border: "1px solid rgba(192,98,74,0.25)",
                 fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: "#C0624A", cursor: "pointer",
               }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                {joinRequests.filter(r => r.status === "pending").length} request{joinRequests.filter(r => r.status === "pending").length > 1 ? "s" : ""}
+                {pendingRequests.length} {pluralize(pendingRequests.length, "request", "requests")}
               </button>
             )}
-            {roomProperties.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ width: 44, height: 5, borderRadius: 3, background: "rgba(0,0,0,0.08)", overflow: "hidden" }}>
-                  <div style={{ width: `${voteProgress}%`, height: "100%", background: B.gold, borderRadius: 3, transition: "width 0.5s ease" }} />
-                </div>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>{voterCount}/{members.length} voted</span>
+
+            {/* Room code */}
+            <button onClick={copyCode}
+              onMouseEnter={e => { e.currentTarget.style.background = copied ? "rgba(74,124,89,0.18)" : "rgba(166,124,61,0.14)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(44,26,14,0.1)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = copied ? "rgba(74,124,89,0.12)" : B.goldBg; e.currentTarget.style.boxShadow = "none"; }}
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                background: copied ? "rgba(74,124,89,0.12)" : B.goldBg,
+                border: `1.5px solid ${copied ? "rgba(74,124,89,0.35)" : B.border}`,
+                borderRadius: 10, padding: "7px 14px", cursor: "pointer",
+                transition: "all 0.2s",
+              }}>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 800, color: copied ? "#4A7C59" : B.ink, letterSpacing: 2 }}>{copied ? "Copied!" : code}</span>
+              {copied
+                ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A7C59" strokeWidth="2.5" strokeLinecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+                : <Icon d={IC.copy} size={12} color={B.muted} sw={1.8} />
+              }
+            </button>
+
+            {/* Member avatars with owner management dropdown */}
+            <div ref={memberMenuRef} style={{ position: "relative" }}>
+              <div onClick={() => { if (isOwner) setShowMemberMenu(v => !v); }}
+                onMouseEnter={e => e.currentTarget.style.opacity = "0.8"}
+                onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                style={{ cursor: isOwner ? "pointer" : "default", transition: "opacity 0.15s" }}>
+                <MemberAvatars members={members} />
               </div>
-            )}
-            <div style={{ display: "flex", alignItems: "center" }}>
-              {members.slice(0, 5).map((m, i) => (
-                <div key={m.id || i} title={m.display_name} style={{
-                  width: 26, height: 26, borderRadius: "50%", background: m.avatar_color || B.gold,
-                  border: "2px solid rgba(255,252,247,0.95)", marginLeft: i > 0 ? -6 : 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff",
-                  zIndex: 5 - i, position: "relative", boxShadow: "0 1px 3px rgba(0,0,0,0.12)",
-                }}>{m.display_name?.[0]?.toUpperCase()}</div>
-              ))}
-              {members.length > 5 && (
-                <div style={{ width: 26, height: 26, borderRadius: "50%", background: B.goldBg, border: "2px solid rgba(255,252,247,0.95)", marginLeft: -6, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.gold, fontWeight: 700 }}>+{members.length - 5}</span>
+              {showMemberMenu && isOwner && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 100,
+                  width: 220, background: "#fff", borderRadius: 10,
+                  border: `1px solid ${B.border}`, boxShadow: "0 8px 24px rgba(44,26,14,0.12)",
+                  padding: "8px 0", animation: "fadeIn 0.12s ease",
+                }}>
+                  <div style={{ padding: "4px 12px 8px", fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Members</div>
+                  {members.map(m => (
+                    <div key={m.auth_user_id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px" }}>
+                      <div style={{ width: 24, height: 24, borderRadius: "50%", background: m.avatar_color || B.gold, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: "#fff", fontFamily: "'DM Sans', sans-serif", flexShrink: 0 }}>
+                        {(m.display_name || "?")[0].toUpperCase()}
+                      </div>
+                      <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.ink, flex: 1 }}>
+                        {m.display_name || "Member"}
+                        {m.role === "owner" && <span style={{ marginLeft: 4, fontSize: 9, color: B.gold, fontWeight: 600 }}>Owner</span>}
+                      </span>
+                      {m.role !== "owner" && (
+                        <button onClick={async () => {
+                          if (!confirm(`Remove ${m.display_name || "this member"} from the room?`)) return;
+                          await removeMember(room.id, m.auth_user_id);
+                          setMembers(prev => prev.filter(x => x.auth_user_id !== m.auth_user_id));
+                          setShowMemberMenu(false);
+                        }} title="Remove member" style={{
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          width: 22, height: 22, borderRadius: 6, border: "none",
+                          background: "rgba(192,98,74,0.08)", cursor: "pointer", flexShrink: 0,
+                        }}>
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#C0624A" strokeWidth="2.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-            <button onClick={() => setShowAddDrawer(true)} style={{
-              display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
-              border: "none", background: B.ink, color: "#FAF6EE",
-              fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
-            }}>
+            <button onClick={() => setShowAddDrawer(true)}
+              onMouseEnter={e => { e.currentTarget.style.background = "#3D3228"; e.currentTarget.style.boxShadow = "0 3px 10px rgba(44,26,14,0.22)"; }}
+              onMouseLeave={e => { e.currentTarget.style.background = B.ink; e.currentTarget.style.boxShadow = "none"; }}
+              style={{
+                display: "flex", alignItems: "center", gap: 5, padding: "7px 14px", borderRadius: 10,
+                border: "none", background: B.ink, color: "#FAF6EE",
+                fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                transition: "background 0.15s, box-shadow 0.15s",
+              }}>
               <Icon d={IC.plus} size={12} color="#FAF6EE" sw={2} />
               Add
             </button>
@@ -370,35 +553,25 @@ export default function RoomView() {
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                   <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 500, color: B.ink }}>Live Leaderboard</div>
-                  {/* Live pulse dot */}
-                  {totalVotes > 0 && (
-                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#5C8A6B", boxShadow: "0 0 0 0 rgba(92,138,107,0.4)", animation: "pulse 2s infinite" }} />
-                  )}
                 </div>
                 <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 2 }}>
-                  {roomProperties.length} {roomProperties.length === 1 ? "property" : "properties"} · {totalVotes} vote{totalVotes !== 1 ? "s" : ""}
+                  {roomProperties.length} {pluralize(roomProperties.length, "property", "properties")} · {totalVotes} {pluralize(totalVotes, "vote", "votes")}
                 </div>
               </div>
-              <button onClick={() => setShowAddDrawer(true)} style={{
-                display: "flex", alignItems: "center", gap: 5, padding: "7px 13px", borderRadius: 8,
-                border: `1px solid ${B.border}`, background: B.goldBg, color: B.gold,
-                fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
-              }}>
+              <button onClick={() => setShowAddDrawer(true)}
+                onMouseEnter={e => { e.currentTarget.style.background = "rgba(166,124,61,0.18)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(166,124,61,0.15)"; }}
+                onMouseLeave={e => { e.currentTarget.style.background = B.goldBg; e.currentTarget.style.boxShadow = "none"; }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5, padding: "7px 13px", borderRadius: 8,
+                  border: `1px solid ${B.border}`, background: B.goldBg, color: B.gold,
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                  transition: "background 0.15s, box-shadow 0.15s",
+                }}>
                 <Icon d={IC.plus} size={12} color={B.gold} sw={2.2} />
                 Add
               </button>
             </div>
-            {/* Voting progress bar */}
-            {roomProperties.length > 0 && members.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ flex: 1, height: 3, borderRadius: 2, background: "rgba(0,0,0,0.06)", overflow: "hidden" }}>
-                  <div style={{ width: `${voteProgress}%`, height: "100%", background: B.gold, borderRadius: 2, transition: "width 0.6s ease" }} />
-                </div>
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, whiteSpace: "nowrap" }}>
-                  {voterCount}/{members.length} voted
-                </span>
-              </div>
-            )}
+
           </div>
 
           {/* Leaderboard list — sorted by net vote score */}
@@ -417,50 +590,21 @@ export default function RoomView() {
                   Browse Properties
                 </button>
               </div>
-            ) : (() => {
-              // Sort by net score descending, then by title as tiebreaker
-              const scored = roomProperties.map(p => {
-                const pvotes = votesFor(p.id);
-                const score  = pvotes.reduce((s, v) => s + (v.vote === 1 ? 1 : -1), 0);
-                const likes  = pvotes.filter(v => v.vote === 1).length;
-                const dislikes = pvotes.filter(v => v.vote === -1).length;
-                return { p, score, likes, dislikes };
-              }).sort((a, b) => b.score - a.score || b.likes - a.likes || a.p.title.localeCompare(b.p.title));
-
-              return scored.map(({ p, score, likes, dislikes }, rank) => {
-                const meta = roomPropMeta.find(r => r.property_id === p.id);
-                const rankColor = rank === 0 ? "#A67C3D" : rank === 1 ? "#8C9BAB" : rank === 2 ? "#9B7553" : B.muted;
-                const rankBg    = rank === 0 ? "rgba(166,124,61,0.12)" : rank === 1 ? "rgba(140,155,171,0.1)" : rank === 2 ? "rgba(155,117,83,0.1)" : "transparent";
-                return (
-                  <div key={p.id} style={{ position: "relative" }}>
-                    {/* Rank badge */}
-                    <div style={{
-                      position: "absolute", top: 9, left: 9, zIndex: 2,
-                      width: 22, height: 22, borderRadius: "50%",
-                      background: rankBg, border: `1.5px solid ${rankColor}55`,
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: rankColor,
-                    }}>
-                      {rank + 1}
-                    </div>
-                    <RoomPropertyCard
-                      property={p}
-                      votes={votesFor(p.id)}
-                      myVote={myVotes[p.id] ?? null}
-                      addedBy={meta?.added_by}
-                      members={members}
-                      isSelected={selected?.id === p.id}
-                      onSelect={() => setSelected(prev => prev?.id === p.id ? null : p)}
-                      onVote={vote => handleVote(p.id, vote)}
-                      onRemove={() => handleRemoveProperty(p.id)}
-                      canRemove={meta?.added_by === user?.id || room?.created_by === user?.id}
-                      score={score}
-                      rank={rank}
-                    />
-                  </div>
-                );
-              });
-            })()}
+            ) : (
+              <LeaderboardList
+                properties={roomProperties}
+                votesByProperty={votesByProperty}
+                myVotes={myVotes}
+                roomPropMeta={roomPropMeta}
+                members={members}
+                selected={selected}
+                userId={user?.id}
+                roomOwnerId={room?.created_by}
+                onToggleSelect={toggleSelect}
+                onVote={handleVote}
+                onRemove={handleRemoveProperty}
+              />
+            )}
           </div>
         </div>
 
@@ -482,11 +626,13 @@ export default function RoomView() {
               ["map",   IC.map,   "Map"],
               ["blend", IC.spark, "Blend"],
               ["picks", "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11", "Group Picks"],
-              ...(isOwner ? [["requests", "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0", `Requests${joinRequests.filter(r=>r.status==="pending").length > 0 ? ` (${joinRequests.filter(r=>r.status==="pending").length})` : ""}`]] : []),
+              ...(isOwner ? [["requests", "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0", pendingRequests.length > 0 ? "Requests (" + pendingRequests.length + ")" : "Requests"]] : []),
             ].map(([tab, icon, label]) => (
               <button
                 key={tab}
                 onClick={() => setRightTab(tab)}
+                onMouseEnter={e => { if (rightTab !== tab) e.currentTarget.style.background = "rgba(166,124,61,0.1)"; }}
+                onMouseLeave={e => { if (rightTab !== tab) e.currentTarget.style.background = "transparent"; }}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
                   padding: "8px 14px", border: "none",
@@ -500,13 +646,7 @@ export default function RoomView() {
               >
                 <Icon d={icon} size={13} color={rightTab === tab ? "#FAF6EE" : B.muted} sw={1.8} />
                 {label}
-                {tab === "blend" && votes.length > 0 && (
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: rightTab === tab ? "rgba(255,255,255,0.9)" : "#5C8A6B", marginLeft: 1 }} />
-                )}
-                {tab === "picks" && roomProperties.length > 0 && (
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", background: rightTab === tab ? "rgba(255,255,255,0.9)" : B.gold, marginLeft: 1 }} />
-                )}
-                {tab === "requests" && joinRequests.filter(r=>r.status==="pending").length > 0 && (
+                {tab === "requests" && pendingRequests.length > 0 && (
                   <span style={{ width: 5, height: 5, borderRadius: "50%", background: rightTab === tab ? "rgba(255,255,255,0.9)" : "#C0624A", marginLeft: 1, animation: "pulse 1.5s ease infinite" }} />
                 )}
               </button>
@@ -522,7 +662,7 @@ export default function RoomView() {
                 properties={roomProperties.length > 0 ? roomProperties : PROPERTIES}
                 swipes={myVotes}
                 selectedProperty={selected}
-                onSelect={p => setSelected(prev => prev?.id === p.id ? null : p)}
+                onSelect={toggleSelect}
               />
               {selected && (
                 <PropertyModal
@@ -573,108 +713,14 @@ export default function RoomView() {
                 opacity: rightTab === "requests" ? 1 : 0,
                 pointerEvents: rightTab === "requests" ? "auto" : "none",
                 transition: "opacity 0.2s",
-                background: `linear-gradient(160deg, rgba(252,248,242,0.99) 0%, rgba(246,239,228,0.99) 100%)`,
-                overflowY: "auto", padding: "24px 28px",
               }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: B.muted, marginBottom: 8 }}>
-                  Join Requests
-                </div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, color: B.ink, marginBottom: 20 }}>
-                  Room Members
-                </div>
-
-                {/* Pending requests */}
-                {joinRequests.filter(r => r.status === "pending").length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 28 }}>
-                    {joinRequests.filter(r => r.status === "pending").map(req => (
-                      <div key={req.id} style={{
-                        display: "flex", alignItems: "center", gap: 12,
-                        padding: "14px 16px", borderRadius: 12,
-                        background: "rgba(255,255,255,0.8)", border: `1px solid ${B.border}`,
-                      }}>
-                        <div style={{
-                          width: 38, height: 38, borderRadius: "50%",
-                          background: B.gold, display: "flex", alignItems: "center", justifyContent: "center",
-                          fontFamily: "'DM Sans', sans-serif", fontSize: 14, fontWeight: 700, color: "#FAF6EE", flexShrink: 0,
-                        }}>
-                          {(req.display_name || "?")[0]?.toUpperCase()}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, color: B.ink }}>
-                            {req.display_name || "Unknown User"}
-                          </div>
-                          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 2 }}>
-                            Wants to join · {new Date(req.created_at).toLocaleDateString()}
-                          </div>
-                        </div>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button
-                            onClick={() => handleRespondToRequest(req.id, false)}
-                            style={{
-                              padding: "6px 12px", borderRadius: 7,
-                              background: "rgba(192,98,74,0.08)", border: "1px solid rgba(192,98,74,0.2)",
-                              color: "#C0624A", fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
-                              cursor: "pointer",
-                            }}
-                          >Decline</button>
-                          <button
-                            onClick={() => handleRespondToRequest(req.id, true)}
-                            style={{
-                              padding: "6px 12px", borderRadius: 7,
-                              background: "rgba(92,138,107,0.12)", border: "1px solid rgba(92,138,107,0.3)",
-                              color: "#5C8A6B", fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
-                              cursor: "pointer",
-                            }}
-                          >Approve</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: "20px", borderRadius: 12, textAlign: "center",
-                    background: "rgba(166,124,61,0.05)", border: `1px dashed rgba(166,124,61,0.2)`,
-                    marginBottom: 24,
-                  }}>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted }}>
-                      No pending requests
-                    </div>
-                  </div>
-                )}
-
-                {/* Current members */}
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: B.muted, marginBottom: 10 }}>
-                  Current Members ({members.length})
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {members.map((m, i) => (
-                    <div key={m.id || i} style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "10px 14px", borderRadius: 10,
-                      background: "rgba(255,255,255,0.65)", border: `1px solid ${B.border}`,
-                    }}>
-                      <div style={{
-                        width: 32, height: 32, borderRadius: "50%",
-                        background: m.avatar_color || B.gold,
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: "#FAF6EE", flexShrink: 0,
-                      }}>
-                        {m.display_name?.[0]?.toUpperCase()}
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600, color: B.ink }}>
-                          {m.display_name}
-                          {m.auth_user_id === room?.created_by && (
-                            <span style={{ marginLeft: 7, padding: "1px 6px", borderRadius: 4, background: B.goldBg, color: B.gold, fontSize: 9, fontWeight: 700 }}>Owner</span>
-                          )}
-                        </div>
-                        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, marginTop: 1 }}>
-                          {votes.filter(v => v.user_id === m.auth_user_id).length} vote{votes.filter(v => v.user_id === m.auth_user_id).length !== 1 ? "s" : ""} cast
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <JoinRequestsPanel
+                  joinRequests={joinRequests}
+                  members={members}
+                  votes={votes}
+                  roomOwnerId={room?.created_by}
+                  onRespond={handleRespondToRequest}
+                />
               </div>
             )}
           </div>

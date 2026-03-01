@@ -1,14 +1,16 @@
 // ── Brand tokens ──────────────────────────────────────────────────────────────
+import PropTypes from "prop-types";
+
 export const B = {
-  bg:       "#F3EDE3",
-  bgCard:   "rgba(249,244,236,0.95)",
-  bgPanel:  "rgba(251,247,241,0.98)",
+  bg:       "#FFF2E1",
+  bgCard:   "rgba(255,255,255,0.9)",
+  bgPanel:  "rgba(255,252,247,0.98)",
   ink:      "#2C1A0E",
   inkSoft:  "#4A2E18",
-  muted:    "#8C7056",
+  muted:    "#A79277",
   gold:     "#A67C3D",
   goldBg:   "rgba(166,124,61,0.08)",
-  border:   "rgba(166,124,61,0.22)",
+  border:   "rgba(167,146,119,0.25)",
   like:     "#4A7C59",
   likeBg:   "rgba(74,124,89,0.09)",
   pass:     "#8B3A3A",
@@ -53,11 +55,19 @@ export function Icon({ d, size = 18, color = B.gold, sw = 1.5, fill = "none" }) 
       style={{ display: "block", flexShrink: 0 }}
     >
       {d.split(" M").map((segment, i) => (
-        <path key={i} d={i === 0 ? segment : "M" + segment} />
+        <path key={`seg-${segment.slice(0, 12)}`} d={i === 0 ? segment : "M" + segment} />
       ))}
     </svg>
   );
 }
+
+Icon.propTypes = {
+  d: PropTypes.string.isRequired,
+  size: PropTypes.number,
+  color: PropTypes.string,
+  sw: PropTypes.number,
+  fill: PropTypes.string,
+};
 
 // ── Blend score → color ────────────────────────────────────────────────────────
 export function blendColor(score) {
@@ -78,7 +88,10 @@ export function Spinner({ size = 18, color = B.gold }) {
     }} />
   );
 }
-
+Spinner.propTypes = {
+  size: PropTypes.number,
+  color: PropTypes.string,
+};
 // ── LogoMark ───────────────────────────────────────────────────────────────────
 export function LogoMark({ size = 28 }) {
   return (
@@ -89,3 +102,7 @@ export function LogoMark({ size = 28 }) {
     </svg>
   );
 }
+
+LogoMark.propTypes = {
+  size: PropTypes.number,
+};

@@ -88,7 +88,6 @@ function generateGroupInsights(tasteVectors, userNames, groupCompat) {
   // Feature-level group insights
   for (const key of FEATURE_KEYS) {
     const scores = userIds.map((id) => tasteVectors[id][key] || 0);
-    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
     const allHigh = scores.every((s) => s >= 0.6);
     const allLow = scores.every((s) => s <= 0.25);
     const label = FEATURE_LABELS[key];

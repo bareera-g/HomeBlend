@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import PropTypes from "prop-types";
 import { useNavigate } from "react-router-dom";
 import { B, Icon, IC, LogoMark } from "../Brand.jsx";
 import { useAuth } from "../lib/auth.jsx";
@@ -14,12 +15,13 @@ import { PROPERTIES } from "../data/properties.js";
 import { computeUniquePropertyImages } from "../lib/uniquePropertyImages.js";
 import MapPanel from "./MapPanel.jsx";
 import LoadingScreen from "./LoadingScreen.jsx";
+import { DashboardSkeleton } from "./Skeleton.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
 import PropertyExpandModal from "./PropertyExpandModal.jsx";
 
 function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
-const IMG_H = 230;
+const IMG_H = 260;
 
 /** Price steps: $100 at low end → $250 mid → $500 at high end; extends to $7k for luxury listings */
 const PRICE_STEPS = [
@@ -68,11 +70,18 @@ export default function Dashboard() {
   const [createdRoom,     setCreatedRoom]    = useState(null);   // { id, name, room_code } after creation
   const [showAddDrawerForRoomId, setShowAddDrawerForRoomId] = useState(null); // room id when opening Add Properties drawer
   const [codeCopied,      setCodeCopied]     = useState(false);
-  const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
   const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
   const [highlightedPropertyId, setHighlightedPropertyId] = useState(null);     // map-click → scroll to card & pulse highlight
   const [showLoader, setShowLoader] = useState(true);   // stays until bar completes after loading done
   const [expandedProperty, setExpandedProperty] = useState(null); // full-screen detail modal
+  const [showAvatarMenu, setShowAvatarMenu] = useState(false);  // header avatar popover
+  const [leftCollapsed, setLeftCollapsed] = useState(false);    // left panel minimized
+  const [selectedCity, setSelectedCity] = useState("All");       // city filter
+  const [citySearch, setCitySearch] = useState("");             // city autocomplete query
+  const [showCityPicker, setShowCityPicker] = useState(false);  // city dropdown open
+
+  const avatarMenuRef = useRef(null);
+  const cityPickerRef = useRef(null);
 
   const CREATE_NEW_ROOM_ID = "__create_new__";
 
@@ -84,6 +93,8 @@ export default function Dashboard() {
   const ghostRef        = useRef(null);
   const roomsListRef    = useRef(null);   // scrollable rooms list
   const scrollIntervalRef = useRef(null); // hover-to-scroll interval
+  const roomMetaRef      = useRef(roomMeta); // keep fresh ref for drop handler
+  roomMetaRef.current = roomMeta;
   const [roomScrollState, setRoomScrollState] = useState({ canScrollUp: false, canScrollDown: false });
 
   // Detect when room list overflows and update scroll position state (for conditional up/down arrows)
@@ -122,11 +133,31 @@ export default function Dashboard() {
     return () => stopRoomListScroll();
   }, [dragging, stopRoomListScroll]);
 
+  // ── Close avatar menu on outside click ────────────────────────────────────
+  useEffect(() => {
+    if (!showAvatarMenu) return;
+    function handleClick(e) {
+      if (avatarMenuRef.current && !avatarMenuRef.current.contains(e.target)) {
+        setShowAvatarMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showAvatarMenu]);
+
   // ── Data fetch (with minimum display time for fake progress bar) ──────────
   const MIN_LOADING_MS = 1000;
   useEffect(() => {
     if (!user) return;
     const start = Date.now();
+    async function buildRoomMeta(roomList) {
+      const meta = {};
+      await Promise.all(roomList.map(async room => {
+        const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
+        meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
+      }));
+      return meta;
+    }
     async function init() {
       setLoading(true);
       try {
@@ -139,12 +170,7 @@ export default function Dashboard() {
         setRooms(r);
         setSavedIds(s);
         if (r.length > 0) {
-          const meta = {};
-          await Promise.all(r.map(async room => {
-            const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
-            meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
-          }));
-          setRoomMeta(meta);
+          setRoomMeta(await buildRoomMeta(r));
         }
       } catch (e) {
         console.error("[HomeBlend] Init error:", e);
@@ -168,9 +194,28 @@ export default function Dashboard() {
     setShowLoader(true);
   }, [loading]);
 
+
+
+  // ── City list derived from all properties ──────────────────────────────────
+  const allCities = useMemo(() => {
+    const set = new Set(PROPERTIES.map(p => p.location));
+    return ["All", ...Array.from(set).sort()];
+  }, []);
+
+  // Close city picker on outside click
+  useEffect(() => {
+    if (!showCityPicker) return;
+    const handler = (e) => {
+      if (cityPickerRef.current && !cityPickerRef.current.contains(e.target)) setShowCityPicker(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showCityPicker]);
+
   // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     let list = PROPERTIES.filter(p => {
+      if (selectedCity !== "All" && p.location !== selectedCity) return false;
       if (filter === "saved" && !savedIds.includes(p.id)) return false;
       if (category !== "All" && p.category !== category) return false;
       if (p.priceNum > maxPrice) return false;
@@ -186,12 +231,12 @@ export default function Dashboard() {
     else if (sortBy === "newest")     list = [...list].sort((a, b) => b.yearBuilt - a.yearBuilt);
     else if (sortBy === "largest")    list = [...list].sort((a, b) => b.sqft - a.sqft);
     return list;
-  }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
+  }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds, selectedCity]);
 
   const uniqueImageUrls = useMemo(() => computeUniquePropertyImages(filtered), [filtered]);
 
   const activeFilters = [
-    maxPrice < PRICE_STEPS[PRICE_STEPS.length - 1], minBeds > 0, minBaths > 0,
+    maxPrice < PRICE_STEPS.at(-1), minBeds > 0, minBaths > 0,
     petOnly, parkingReq, laundryReq, sortBy !== "default",
   ].filter(Boolean).length;
 
@@ -221,19 +266,19 @@ export default function Dashboard() {
       try {
         room = await createRoom(name, user.id, profile?.display_name || user.email?.split("@")[0] || "Me", profile?.avatar_color || "#A67C3D");
         await joinRoom(room.id, user.id, profile?.display_name || user.email?.split("@")[0] || "Me", profile?.avatar_color || "#A67C3D");
-      } catch (dbErr) {
+      } catch (error_) {
         const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        console.warn("[HomeBlend] DB error creating room:", dbErr.message);
+        console.warn("[HomeBlend] DB error creating room:", error_.message);
         room = { id: `local-${fallbackCode}`, name, room_code: fallbackCode, created_by: user.id, local: true };
         setShowDbBanner(true);
-        setDbError(dbErr.message);
+        setDbError(error_.message);
       }
       setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 0, propIds: [] } }));
       setCreatedRoom({ id: room.id, name: room.name || name, room_code: room.room_code });
       setNewRoomName("");
-    } catch (e) {
-      console.error("[HomeBlend] createRoom unexpected error:", e);
+    } catch (error_) {
+      console.error("[HomeBlend] createRoom unexpected error:", error_);
     } finally { setBusy(false); }
   }
 
@@ -247,15 +292,15 @@ export default function Dashboard() {
         await joinRoom(room.id, user.id, profile?.display_name || user.email?.split("@")[0] || "Me", profile?.avatar_color || "#A67C3D");
         try {
           await addPropertyToRoom(room.id, propertyId, user.id);
-        } catch (addErr) {
-          console.warn("[HomeBlend] addPropertyToRoom failed:", addErr.message);
+        } catch (error_) {
+          console.warn("[HomeBlend] addPropertyToRoom failed:", error_.message);
         }
-      } catch (dbErr) {
+      } catch (error_) {
         const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        console.warn("[HomeBlend] DB error creating room:", dbErr.message);
+        console.warn("[HomeBlend] DB error creating room:", error_.message);
         room = { id: `local-${fallbackCode}`, name, room_code: fallbackCode, created_by: user.id, local: true };
         setShowDbBanner(true);
-        setDbError(dbErr.message);
+        setDbError(error_.message);
       }
       setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 1, propIds: [Number(propertyId)] } }));
@@ -288,6 +333,61 @@ export default function Dashboard() {
   }
 
   // ── Custom mouse-drag system ──────────────────────────────────────────────
+
+  /** Hit-test: check if (x,y) is over the create-new zone or any room card */
+  function hitTestRoomCards(x, y) {
+    const createEl = createNewRoomRef.current;
+    if (createEl) {
+      const rect = createEl.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        return CREATE_NEW_ROOM_ID;
+      }
+    }
+    for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        return roomId;
+      }
+    }
+    return null;
+  }
+
+  /** Build drag ghost DOM element for a property */
+  function buildDragGhost(propId) {
+    const ghost = document.createElement("div");
+    ghost.style.cssText = `
+      position: fixed; z-index: 9999; pointer-events: none;
+      width: 168px; border-radius: 16px; overflow: hidden;
+      background: #fff;
+      border: 1.5px solid rgba(167,146,119,0.55);
+      box-shadow: 0 20px 56px rgba(40,24,8,0.35), 0 0 0 2px rgba(167,146,119,0.4);
+      transform: rotate(3deg) scale(1.05);
+      animation: pop 0.15s ease;
+      opacity: 0.97;
+    `;
+    const prop = PROPERTIES.find(p => p.id === propId);
+    if (prop) {
+      ghost.innerHTML = `
+        <div style="position:relative;height:120px;background:url(${prop.images[0]}) center/cover;flex-shrink:0;">
+          <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(12,5,2,0.65) 0%,transparent 55%);"></div>
+          <div style="position:absolute;top:8px;right:8px;padding:2px 7px;border-radius:4px;background:rgba(12,5,2,0.6);font-family:'DM Sans',sans-serif;font-size:7px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:rgba(255,255,255,0.92)">${prop.category}</div>
+          <div style="position:absolute;bottom:8px;left:10px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:400;color:#fff;line-height:1">${prop.price}</div>
+          </div>
+        </div>
+        <div style="padding:9px 10px 8px;">
+          <div style="font-family:'Cormorant Garamond',serif;font-size:13.5px;font-weight:400;color:#2C1A0E;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${prop.title}</div>
+          <div style="font-family:'DM Sans',sans-serif;font-size:9px;color:#8C7056;margin-top:3px;">${prop.beds}bd · ${prop.baths}ba · ${prop.sqft?.toLocaleString()}sf</div>
+        </div>
+        <div style="margin:0 10px 9px;padding:5px 8px;border-radius:7px;background:rgba(166,124,61,0.08);border:1px dashed rgba(166,124,61,0.4);text-align:center;">
+          <span style="font-family:'DM Sans',sans-serif;font-size:8.5px;font-weight:700;color:#A67C3D;letter-spacing:1.1px;text-transform:uppercase;">Drop into a room</span>
+        </div>
+      `;
+    }
+    return ghost;
+  }
+
   const cleanupDrag = useCallback(() => {
     if (ghostRef.current) {
       ghostRef.current.remove();
@@ -299,8 +399,8 @@ export default function Dashboard() {
     setDraggedPropId(null);
     setDragOverRoom(null);
     // Remove the exact handler refs that were added (avoids stale-closure leak)
-    if (listenersRef.current.move) window.removeEventListener("mousemove", listenersRef.current.move);
-    if (listenersRef.current.up)   window.removeEventListener("mouseup",   listenersRef.current.up);
+    if (listenersRef.current.move) globalThis.removeEventListener("mousemove", listenersRef.current.move);
+    if (listenersRef.current.up)   globalThis.removeEventListener("mouseup",   listenersRef.current.up);
     listenersRef.current = { move: null, up: null };
   }, []);
 
@@ -310,7 +410,7 @@ export default function Dashboard() {
 
     const dx = e.clientX - dr.startX;
     const dy = e.clientY - dr.startY;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    const dist = Math.hypot(dx, dy);
 
     // Initiate drag after 6px movement threshold
     if (!dr.active && dist > 6) {
@@ -319,37 +419,7 @@ export default function Dashboard() {
       setDraggedPropId(dr.propId);
       setShowRooms(true); // Auto-open rooms panel
 
-      // Create drag ghost — tall vertical card with large photo
-      const ghost = document.createElement("div");
-      ghost.style.cssText = `
-        position: fixed; z-index: 9999; pointer-events: none;
-        width: 168px; border-radius: 16px; overflow: hidden;
-        background: #fff;
-        border: 1.5px solid rgba(166,124,61,0.55);
-        box-shadow: 0 20px 56px rgba(40,24,8,0.35), 0 4px 16px rgba(40,24,8,0.15);
-        transform: rotate(3deg) scale(1.05);
-        animation: pop 0.15s ease;
-        opacity: 0.97;
-      `;
-      const prop = PROPERTIES.find(p => p.id === dr.propId);
-      if (prop) {
-        ghost.innerHTML = `
-          <div style="position:relative;height:120px;background:url(${prop.images[0]}) center/cover;flex-shrink:0;">
-            <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(12,5,2,0.65) 0%,transparent 55%);"></div>
-            <div style="position:absolute;top:8px;right:8px;padding:2px 7px;border-radius:4px;background:rgba(12,5,2,0.6);font-family:'DM Sans',sans-serif;font-size:7px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:rgba(255,255,255,0.92)">${prop.category}</div>
-            <div style="position:absolute;bottom:8px;left:10px;">
-              <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:500;color:#fff;line-height:1">${prop.price}</div>
-            </div>
-          </div>
-          <div style="padding:9px 10px 8px;">
-            <div style="font-family:'Cormorant Garamond',serif;font-size:13.5px;font-weight:500;color:#2C1A0E;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${prop.title}</div>
-            <div style="font-family:'DM Sans',sans-serif;font-size:9px;color:#8C7056;margin-top:3px;">${prop.beds}bd · ${prop.baths}ba · ${prop.sqft?.toLocaleString()}sf</div>
-          </div>
-          <div style="margin:0 10px 9px;padding:5px 8px;border-radius:7px;background:rgba(166,124,61,0.08);border:1px dashed rgba(166,124,61,0.4);text-align:center;">
-            <span style="font-family:'DM Sans',sans-serif;font-size:8.5px;font-weight:700;color:#A67C3D;letter-spacing:1.1px;text-transform:uppercase;">Drop into a room</span>
-          </div>
-        `;
-      }
+      const ghost = buildDragGhost(dr.propId);
       document.body.appendChild(ghost);
       ghostRef.current = ghost;
     }
@@ -359,28 +429,7 @@ export default function Dashboard() {
       ghostRef.current.style.top  = `${e.clientY - 80}px`;
     }
 
-    // Hit-test: create-new zone first, then room cards
-    let overRoom = null;
-    const createEl = createNewRoomRef.current;
-    if (createEl) {
-      const rect = createEl.getBoundingClientRect();
-      if (e.clientX >= rect.left && e.clientX <= rect.right &&
-          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-        overRoom = CREATE_NEW_ROOM_ID;
-      }
-    }
-    if (!overRoom) {
-      for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.right &&
-            e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-          overRoom = roomId;
-          break;
-        }
-      }
-    }
-    setDragOverRoom(overRoom);
+    setDragOverRoom(hitTestRoomCards(e.clientX, e.clientY));
   }, []);
 
   const handleMouseUp = useCallback(async (e) => {
@@ -395,28 +444,7 @@ export default function Dashboard() {
       return;
     }
 
-    // Find which room or create-new zone was dropped on
-    let droppedRoom = null;
-    const createEl = createNewRoomRef.current;
-    if (createEl) {
-      const rect = createEl.getBoundingClientRect();
-      if (e.clientX >= rect.left && e.clientX <= rect.right &&
-          e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-        droppedRoom = CREATE_NEW_ROOM_ID;
-      }
-    }
-    if (!droppedRoom) {
-      for (const [roomId, el] of Object.entries(roomCardRefs.current)) {
-        if (!el) continue;
-        const rect = el.getBoundingClientRect();
-        if (e.clientX >= rect.left && e.clientX <= rect.right &&
-            e.clientY >= rect.top  && e.clientY <= rect.bottom) {
-          droppedRoom = roomId;
-          break;
-        }
-      }
-    }
-
+    const droppedRoom = hitTestRoomCards(e.clientX, e.clientY);
     const propId = dr.propId;
     cleanupDrag();
 
@@ -428,39 +456,42 @@ export default function Dashboard() {
       return;
     }
 
-    if (droppedRoom) {
-      const room = rooms.find(r => r.id === droppedRoom);
-      if (!room) return;
-      // Optimistic update
+    if (!droppedRoom) return;
+    const room = rooms.find(r => r.id === droppedRoom);
+    if (!room) return;
+
+    // If property is already in this room, silently do nothing
+    const existing = roomMetaRef.current[room.id]?.propIds || [];
+    if (existing.includes(propId)) return;
+
+    // Optimistic update
+    setRoomMeta(prev => {
+      const cur = prev[room.id] || { memberCount: 0, propertyCount: 0, propIds: [] };
+      if (cur.propIds.includes(propId)) return prev;
+      return { ...prev, [room.id]: { ...cur, propertyCount: cur.propertyCount + 1, propIds: [...cur.propIds, propId] } };
+    });
+    setJustAdded(prev => ({ ...prev, [droppedRoom]: true }));
+    setTimeout(() => setJustAdded(prev => { const n = { ...prev }; delete n[droppedRoom]; return n; }), 2200);
+    try { await addPropertyToRoom(room.id, propId, user.id); }
+    catch (err) {
+      console.error("Add to room failed:", err);
       setRoomMeta(prev => {
-        const cur = prev[room.id] || { memberCount: 0, propertyCount: 0, propIds: [] };
-        if (cur.propIds.includes(propId)) return prev;
-        return { ...prev, [room.id]: { ...cur, propertyCount: cur.propertyCount + 1, propIds: [...cur.propIds, propId] } };
+        const cur = prev[room.id];
+        if (!cur) return prev;
+        return { ...prev, [room.id]: { ...cur, propertyCount: cur.propertyCount - 1, propIds: cur.propIds.filter(id => id !== propId) } };
       });
-      setJustAdded(prev => ({ ...prev, [droppedRoom]: true }));
-      setTimeout(() => setJustAdded(prev => { const n = { ...prev }; delete n[droppedRoom]; return n; }), 2200);
-      try { await addPropertyToRoom(room.id, propId, user.id); }
-      catch (err) {
-        console.error("Add to room failed:", err);
-        // rollback
-        setRoomMeta(prev => {
-          const cur = prev[room.id];
-          if (!cur) return prev;
-          return { ...prev, [room.id]: { ...cur, propertyCount: cur.propertyCount - 1, propIds: cur.propIds.filter(id => id !== propId) } };
-        });
-      }
     }
   }, [rooms, user, cleanupDrag]);
 
   const onCardMouseDown = useCallback((e, propId) => {
     if (e.button !== 0) return; // left button only
     // Clean up any leaked listeners from a previous interaction
-    if (listenersRef.current.move) window.removeEventListener("mousemove", listenersRef.current.move);
-    if (listenersRef.current.up)   window.removeEventListener("mouseup",   listenersRef.current.up);
+    if (listenersRef.current.move) globalThis.removeEventListener("mousemove", listenersRef.current.move);
+    if (listenersRef.current.up)   globalThis.removeEventListener("mouseup",   listenersRef.current.up);
     dragRef.current = { active: false, propId, startX: e.clientX, startY: e.clientY, ghost: null };
     listenersRef.current = { move: handleMouseMove, up: handleMouseUp };
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
+    globalThis.addEventListener("mousemove", handleMouseMove);
+    globalThis.addEventListener("mouseup", handleMouseUp);
   }, [handleMouseMove, handleMouseUp]);
 
   const handleAddPropertyFromDrawer = useCallback(async (roomId, propertyId) => {
@@ -504,63 +535,76 @@ export default function Dashboard() {
   }, [highlightedPropertyId]);
 
   // ── Loading (fake progress bar: fast start, slows near end; min 1s display) ─
-  if (showLoader) return <LoadingScreen loading={loading} />;
+  if (showLoader) return <DashboardSkeleton />;
+
+  function modalTitle() {
+    if (createdRoom) return "Room Created";
+    if (pendingCreatePropertyId) return "Name Your New Room";
+    return "Create a Room";
+  }
 
   return (
     <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: B.bg, overflow: "hidden" }}>
 
-      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      {/* ── Header (48px — logo left, avatar popover right) ─────────────── */}
       <header style={{
-        display: "flex", alignItems: "center", gap: 12, height: 54,
+        display: "flex", alignItems: "center", gap: 12, height: 48,
         padding: "0 18px",
-        background: "rgba(251,247,241,0.98)", backdropFilter: "blur(20px)",
+        background: "rgba(255,252,247,0.98)", backdropFilter: "blur(20px)",
         borderBottom: `1px solid ${B.border}`, flexShrink: 0, zIndex: 60,
       }}>
-        {/* Logo */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 6 }}>
+        {/* Left — Logo */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <LogoMark size={22} />
           <span style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 400, color: B.ink, letterSpacing: 0.3 }}>HomeBlend</span>
         </div>
 
-        {/* Discover / Saved */}
-        <div style={{ display: "flex", background: "rgba(166,124,61,0.07)", borderRadius: 8, padding: 3 }}>
-          {[["all", "Discover"], ["saved", "Saved"]].map(([v, l]) => (
-            <button key={v} onClick={() => setFilter(v)} style={{
-              padding: "5px 14px", borderRadius: 6, border: "none",
-              background: filter === v ? "#fff" : "transparent",
-              boxShadow: filter === v ? "0 1px 6px rgba(80,50,10,0.08)" : "none",
-              fontFamily: "'DM Sans', sans-serif", fontSize: 12,
-              fontWeight: filter === v ? 600 : 400,
-              color: filter === v ? B.ink : B.muted,
-              cursor: "pointer", transition: "all 0.18s",
-            }}>{l}</button>
-          ))}
-        </div>
-
         <div style={{ flex: 1 }} />
 
-        <div style={{ width: 1, height: 18, background: B.border }} />
-
-        {/* User avatar + sign out */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{
-            width: 30, height: 30, borderRadius: "50%",
-            background: profile?.avatar_color || B.gold,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: "#fff",
-            boxShadow: "0 2px 8px rgba(80,50,10,0.15)",
-          }}>
+        {/* Right — Avatar (clicks toggle popover) */}
+        <div style={{ position: "relative" }} ref={avatarMenuRef}>
+          <button
+            onClick={() => setShowAvatarMenu(v => !v)}
+            style={{
+              width: 32, height: 32, borderRadius: "50%",
+              background: profile?.avatar_color || B.gold,
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: "#fff",
+              boxShadow: "0 2px 8px rgba(80,50,10,0.15)",
+              border: showAvatarMenu ? `2px solid ${B.gold}` : "2px solid transparent",
+              cursor: "pointer", transition: "border-color 0.15s",
+            }}
+            title={profile?.display_name}
+          >
             {(profile?.display_name || "?")[0].toUpperCase()}
-          </div>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink, fontWeight: 500 }}>
-            {profile?.display_name}
-          </span>
-          <button onClick={async () => { await signOut(); nav("/auth", { replace: true }); }} style={{
-            padding: "5px 12px", borderRadius: 7,
-            border: `1px solid ${B.border}`, background: "transparent",
-            fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted,
-            cursor: "pointer",
-          }}>Sign out</button>
+          </button>
+          {showAvatarMenu && (
+            <div style={{
+              position: "absolute", top: 40, right: 0, width: 200,
+              background: "#fff", borderRadius: 14,
+              boxShadow: "0 12px 40px rgba(20,12,5,0.18)",
+              border: `1px solid ${B.border}`,
+              padding: "6px 0", zIndex: 100,
+              animation: "fadeIn 0.14s ease",
+            }}>
+              <div style={{ padding: "8px 16px 8px", borderBottom: `1px solid ${B.border}` }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600, color: B.ink }}>{profile?.display_name}</div>
+              </div>
+              <button
+                onClick={async () => { setShowAvatarMenu(false); await signOut(); nav("/auth", { replace: true }); }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 7,
+                  width: "100%", padding: "9px 16px", border: "none",
+                  background: "transparent", cursor: "pointer",
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: "#C0624A",
+                  textAlign: "left",
+                }}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+                Sign out
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -600,117 +644,197 @@ export default function Dashboard() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
 
         {/* ── Properties panel ──────────────────────────────────────────────── */}
-        <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
+        <div style={{ width: leftCollapsed ? 0 : 400, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: leftCollapsed ? "none" : `1px solid ${B.border}`, overflow: "hidden", transition: "width 0.25s ease" }}>
 
-          {/* Sub-header: count + location search + filter toggle */}
-          <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
-            {/* Location search bar — fixed to Irvine, CA (read-only) */}
-            <div style={{ marginBottom: 8, position: "relative" }}>
-              <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 1, pointerEvents: "none" }}>
-                <Icon d={IC.pin} size={14} color={B.muted} sw={1.8} />
-              </div>
-              <input
-                type="text"
-                value="Irvine, CA"
-                readOnly
-                style={{
-                  width: "100%", padding: "8px 12px 8px 34px", borderRadius: 9,
-                  border: `1px solid ${B.border}`, background: "rgba(255,255,255,0.8)",
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink,
-                  outline: "none", boxSizing: "border-box", cursor: "default",
-                }}
-              />
+          {/* Sub-header: Discover/Saved toggle + location pill + count + filter (single row) */}
+          <div style={{ padding: "8px 11px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(255,252,247,0.9)", display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Discover / Saved segmented control (moved from header) */}
+            <div style={{ display: "flex", background: "rgba(166,124,61,0.07)", borderRadius: 7, padding: 2, flexShrink: 0 }}>
+              {[["all", "Discover"], ["saved", "Saved"]].map(([v, l]) => (
+                <button key={v} onClick={() => setFilter(v)} style={{
+                  padding: "4px 10px", borderRadius: 5, border: "none",
+                  background: filter === v ? "#fff" : "transparent",
+                  boxShadow: filter === v ? "0 1px 4px rgba(80,50,10,0.08)" : "none",
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 11,
+                  fontWeight: filter === v ? 600 : 400,
+                  color: filter === v ? B.ink : B.muted,
+                  cursor: "pointer", transition: "all 0.18s",
+                }}>{l}</button>
+              ))}
             </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>
-                <strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"}
-                {dragging && <span style={{ marginLeft: 6, color: B.gold, fontWeight: 600, animation: "pulse 1.5s ease infinite" }}>· drop → room</span>}
-              </div>
-              <button onClick={() => setShowFilters(v => !v)} title="More filters" style={{
-                display: "flex", alignItems: "center", gap: 4,
-                padding: "3px 8px", borderRadius: 7,
-                border: `1px solid ${activeFilters > 0 ? B.gold : B.border}`,
-                background: activeFilters > 0 ? "rgba(166,124,61,0.08)" : "transparent",
-                color: activeFilters > 0 ? B.gold : B.muted,
-                fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 500,
-                cursor: "pointer",
+            {/* Location pill — city picker */}
+            <div ref={cityPickerRef} style={{ position: "relative", flexShrink: 0 }}>
+              <button onClick={() => { setShowCityPicker(v => !v); setCitySearch(""); }} style={{
+                display: "flex", alignItems: "center", gap: 4, padding: "4px 10px 4px 7px", borderRadius: 14,
+                background: selectedCity !== "All" ? "rgba(166,124,61,0.12)" : "rgba(167,146,119,0.1)",
+                border: `1px solid ${selectedCity !== "All" ? B.gold : B.border}`, flexShrink: 0,
+                cursor: "pointer", transition: "all 0.15s",
               }}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/>
-                </svg>
-                {activeFilters > 0 ? `Filters · ${activeFilters}` : "Filters"}
+                <Icon d={IC.pin} size={12} color={selectedCity !== "All" ? B.gold : B.muted} sw={1.6} />
+                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.ink, fontWeight: 500, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {selectedCity === "All" ? "All Cities" : selectedCity}
+                </span>
+                <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke={B.muted} strokeWidth="1.5" strokeLinecap="round"><polyline points="1,3 4,6 7,3" /></svg>
               </button>
+              {showCityPicker && (
+                <div style={{
+                  position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 100,
+                  width: 220, maxHeight: 280, background: "#fff", borderRadius: 10,
+                  border: `1px solid ${B.border}`, boxShadow: "0 8px 24px rgba(44,26,14,0.12)",
+                  display: "flex", flexDirection: "column", overflow: "hidden",
+                  animation: "fadeIn 0.12s ease",
+                }}>
+                  <div style={{ padding: "8px 8px 4px" }}>
+                    <input
+                      autoFocus
+                      value={citySearch}
+                      onChange={e => setCitySearch(e.target.value)}
+                      placeholder="Search city…"
+                      style={{
+                        width: "100%", padding: "6px 10px", borderRadius: 7,
+                        border: `1px solid ${B.border}`, outline: "none",
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.ink,
+                        background: "rgba(255,252,247,0.8)", boxSizing: "border-box",
+                      }}
+                      onFocus={e => e.target.style.borderColor = B.gold}
+                      onBlur={e => e.target.style.borderColor = B.border}
+                    />
+                  </div>
+                  <div style={{ flex: 1, overflowY: "auto", padding: "4px 0" }}>
+                    {allCities
+                      .filter(c => !citySearch || c.toLowerCase().includes(citySearch.toLowerCase()))
+                      .map(city => (
+                        <button key={city} onClick={() => { setSelectedCity(city); setShowCityPicker(false); setCitySearch(""); }} style={{
+                          display: "block", width: "100%", padding: "7px 14px", border: "none", textAlign: "left",
+                          background: city === selectedCity ? "rgba(166,124,61,0.08)" : "transparent",
+                          fontFamily: "'DM Sans', sans-serif", fontSize: 11, cursor: "pointer",
+                          color: city === selectedCity ? B.gold : B.ink,
+                          fontWeight: city === selectedCity ? 600 : 400,
+                          transition: "background 0.1s",
+                        }}
+                          onMouseEnter={e => e.currentTarget.style.background = "rgba(166,124,61,0.06)"}
+                          onMouseLeave={e => e.currentTarget.style.background = city === selectedCity ? "rgba(166,124,61,0.08)" : "transparent"}
+                        >
+                          {city}
+                        </button>
+                      ))
+                    }
+                  </div>
+                </div>
+              )}
             </div>
+            {/* Count */}
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, whiteSpace: "nowrap" }}>
+              <strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"}
+              {dragging && <span style={{ marginLeft: 4, color: B.gold, fontWeight: 600, animation: "pulse 1.5s ease infinite" }}>· drop → room</span>}
+            </span>
+            <div style={{ flex: 1 }} />
+            {/* Filter button */}
+            <button onClick={() => setShowFilters(v => !v)} title="More filters" style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: "4px 9px", borderRadius: 7, flexShrink: 0,
+              border: `1px solid ${activeFilters > 0 ? B.gold : B.border}`,
+              background: activeFilters > 0 ? "rgba(166,124,61,0.08)" : "transparent",
+              color: activeFilters > 0 ? B.gold : B.muted,
+              fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 500,
+              cursor: "pointer",
+            }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="4" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="10" y1="18" x2="14" y2="18"/>
+              </svg>
+              {activeFilters > 0 ? `Filters · ${activeFilters}` : "Filters"}
+            </button>
           </div>
 
-          {/* Compact filter dropdown (inside properties panel) */}
+          {/* Floating filter card (positioned over scroll list, not inline) */}
+          <div style={{ position: "relative", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           {showFilters && (
-            <div style={{ padding: "12px 11px 10px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0, animation: "fadeIn 0.18s ease" }}>
-              {/* Category */}
-              <div style={{ marginBottom: 9 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Property type</div>
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {CATEGORIES.map(cat => (
-                    <button key={cat} onClick={() => setCategory(cat)} style={{
-                      padding: "3px 9px", borderRadius: 7, border: `1px solid ${category === cat ? B.gold : B.border}`,
-                      background: category === cat ? "rgba(166,124,61,0.1)" : "transparent",
-                      color: category === cat ? B.gold : B.muted,
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: category === cat ? 700 : 400,
-                      cursor: "pointer",
-                    }}>{cat}</button>
-                  ))}
+            <div style={{
+              position: "absolute", top: 4, right: 8, width: 340, zIndex: 50,
+              padding: "16px 16px 14px", borderRadius: 16,
+              background: "#fff", border: `1px solid ${B.border}`,
+              boxShadow: "0 12px 40px rgba(20,12,5,0.16)",
+              animation: "fadeIn 0.15s ease",
+            }}>
+              {/* 2-col: Type | Sort */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase", color: B.muted, marginBottom: 6 }}>Type</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {CATEGORIES.map(cat => (
+                      <button key={cat} onClick={() => setCategory(cat)} style={{
+                        padding: "5px 10px", borderRadius: 7, border: `1px solid ${category === cat ? B.gold : B.border}`,
+                        background: category === cat ? "rgba(166,124,61,0.1)" : "transparent",
+                        color: category === cat ? B.gold : B.muted,
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: category === cat ? 700 : 400,
+                        cursor: "pointer",
+                      }}>{cat}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase", color: B.muted, marginBottom: 6 }}>Sort</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {[["default","Best"],["price-asc","$ ↑"],["price-desc","$ ↓"],["newest","New"],["largest","Big"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setSortBy(v)} style={{
+                        padding: "5px 10px", borderRadius: 7, border: `1px solid ${sortBy === v ? B.gold : B.border}`,
+                        background: sortBy === v ? "rgba(166,124,61,0.1)" : "transparent",
+                        color: sortBy === v ? B.gold : B.muted,
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: sortBy === v ? 700 : 400,
+                        cursor: "pointer",
+                      }}>{l}</button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              {/* Max price */}
-              <div style={{ marginBottom: 9 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Max rent</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
-                    Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
-                  </span>
-                  <input type="range" min={1000} max={7000} step={100} value={Math.min(maxPrice, 7000)}
-                    onChange={e => setMaxPrice(+e.target.value)}
-                    style={{ accentColor: B.gold, flex: 1, minWidth: 0, cursor: "pointer" }} />
+              {/* Max rent slider */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase", color: B.muted }}>Max Rent</span>
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: B.gold }}>${maxPrice.toLocaleString()}</span>
+                </div>
+                <input type="range" min={1000} max={7000} step={100} value={Math.min(maxPrice, 7000)}
+                  onChange={e => setMaxPrice(+e.target.value)}
+                  style={{ accentColor: B.gold, width: "100%", cursor: "pointer" }} />
+              </div>
+              {/* 2-col: Beds | Baths */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Beds</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {[[0,"Any"],[1,"1+"],[2,"2+"],[3,"3+"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setMinBeds(v)} style={{ padding: "5px 9px", borderRadius: 7, border: `1px solid ${minBeds === v ? B.gold : B.border}`, background: minBeds === v ? "rgba(166,124,61,0.1)" : "transparent", color: minBeds === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: minBeds === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Baths</div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {[[0,"Any"],[1,"1+"],[2,"2+"],[2.5,"2.5+"]].map(([v, l]) => (
+                      <button key={v} onClick={() => setMinBaths(v)} style={{ padding: "5px 9px", borderRadius: 7, border: `1px solid ${minBaths === v ? B.gold : B.border}`, background: minBaths === v ? "rgba(166,124,61,0.1)" : "transparent", color: minBaths === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: minBaths === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
+                    ))}
+                  </div>
                 </div>
               </div>
-              {/* Beds */}
-              <div style={{ marginBottom: 9 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bedrooms</div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {[[0,"Any"],[1,"1+"],[2,"2+"],[3,"3+"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setMinBeds(v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${minBeds === v ? B.gold : B.border}`, background: minBeds === v ? "rgba(166,124,61,0.1)" : "transparent", color: minBeds === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: minBeds === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
-                  ))}
-                </div>
+              {/* Amenity icon toggles — 3 col */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                {[[petOnly, setPetOnly, "🐾", "Pets"],[parkingReq, setParkingReq, "🚗", "Parking"],[laundryReq, setLaundryReq, "🧺", "W/D"]].map(([active, setter, emoji, label]) => (
+                  <button key={label} onClick={() => setter(v => !v)} style={{
+                    flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    padding: "7px 0", borderRadius: 7,
+                    border: `1px solid ${active ? B.gold : B.border}`,
+                    background: active ? "rgba(166,124,61,0.1)" : "transparent",
+                    color: active ? B.gold : B.muted,
+                    fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: active ? 600 : 400,
+                    cursor: "pointer",
+                  }}>{emoji} {label}</button>
+                ))}
               </div>
-              {/* Baths */}
-              <div style={{ marginBottom: 9 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bathrooms</div>
-                <div style={{ display: "flex", gap: 4 }}>
-                  {[[0,"Any"],[1,"1+"],[2,"2+"],[2.5,"2.5+"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setMinBaths(v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${minBaths === v ? B.gold : B.border}`, background: minBaths === v ? "rgba(166,124,61,0.1)" : "transparent", color: minBaths === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: minBaths === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
-                  ))}
-                </div>
-              </div>
-              {/* Amenities */}
-              <div style={{ marginBottom: 9 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Amenities</div>
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {[[petOnly, setPetOnly, "Pets OK"],[parkingReq, setParkingReq, "Parking"],[laundryReq, setLaundryReq, "In-unit W/D"]].map(([active, setter, label]) => (
-                    <button key={label} onClick={() => setter(v => !v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${active ? B.gold : B.border}`, background: active ? "rgba(166,124,61,0.1)" : "transparent", color: active ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: active ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap" }}>{label}</button>
-                  ))}
-                </div>
-              </div>
-              {/* Sort */}
-              <div style={{ marginBottom: 6 }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Sort by</div>
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {[["default","Best"],["price-asc","$ ↑"],["price-desc","$ ↓"],["newest","New"],["largest","Big"]].map(([v, l]) => (
-                    <button key={v} onClick={() => setSortBy(v)} style={{ padding: "3px 9px", borderRadius: 7, border: `1px solid ${sortBy === v ? B.gold : B.border}`, background: sortBy === v ? "rgba(166,124,61,0.1)" : "transparent", color: sortBy === v ? B.gold : B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: sortBy === v ? 700 : 400, cursor: "pointer" }}>{l}</button>
-                  ))}
-                </div>
-              </div>
+              {/* Reset */}
               {activeFilters > 0 && (
-                <button onClick={resetFilters} style={{ padding: "3px 10px", borderRadius: 7, border: `1px solid ${B.border}`, background: "transparent", fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, cursor: "pointer" }}>Reset all</button>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <button onClick={resetFilters} style={{ padding: "5px 14px", borderRadius: 7, border: `1px solid ${B.border}`, background: "transparent", fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, cursor: "pointer" }}>Reset all</button>
+                </div>
               )}
             </div>
           )}
@@ -742,7 +866,28 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+          </div>
         </div>
+
+        {/* Left panel collapse/expand nudge tab */}
+        <button
+          onClick={() => setLeftCollapsed(v => !v)}
+          title={leftCollapsed ? "Show listings" : "Hide listings"}
+          style={{
+            position: "absolute", left: leftCollapsed ? 0 : 400, top: "50%", transform: "translateY(-50%)",
+            zIndex: 20, width: 16, height: 48, border: "none", borderRadius: "0 6px 6px 0",
+            background: "rgba(255,252,247,0.95)", cursor: "pointer",
+            boxShadow: "2px 0 8px rgba(80,50,10,0.1)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            transition: "left 0.25s ease",
+          }}
+        >
+          <svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round">
+            {leftCollapsed
+              ? <polyline points="2,2 6,7 2,12" />
+              : <polyline points="6,2 2,7 6,12" />}
+          </svg>
+        </button>
 
         {/* ── Map (fills remaining width) ───────────────────────────────────── */}
         <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
@@ -755,6 +900,7 @@ export default function Dashboard() {
             dragging={dragging}
             draggedPropId={draggedPropId}
             uniqueImageUrls={uniqueImageUrls}
+            leftCollapsed={leftCollapsed}
           />
         </div>
 
@@ -793,13 +939,7 @@ export default function Dashboard() {
               letterSpacing: 2.2, textTransform: "uppercase",
               color: "#F5EDE4", userSelect: "none",
             }}>My Rooms</span>
-            {rooms.length > 0 && (
-              <span style={{
-                width: 20, height: 20, borderRadius: "50%",
-                background: "rgba(255,255,255,0.25)", display: "flex", alignItems: "center", justifyContent: "center",
-                fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 800, color: "#F5EDE4", flexShrink: 0,
-              }}>{rooms.length}</span>
-            )}
+
           </button>
 
           {/* Panel content */}
@@ -814,8 +954,8 @@ export default function Dashboard() {
               <div style={{ padding: "18px 18px 14px", borderBottom: `1px solid ${B.border}`, flexShrink: 0 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
                   <div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase", color: B.gold, marginBottom: 3 }}>Collaborative</div>
-                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 500, color: B.ink }}>Your Rooms</div>
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 600, letterSpacing: 2.2, textTransform: "uppercase", color: B.gold, marginBottom: 3 }}>Collaborative</div>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 400, color: B.ink }}>Your Rooms</div>
                   </div>
                   <button onClick={() => setShowRooms(false)} style={{
                     width: 30, height: 30, borderRadius: "50%",
@@ -826,40 +966,42 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setPendingCreatePropertyId(null); setShowCreateModal(true); }} disabled={busy} style={{
-                  width: "100%", padding: "9px 0", borderRadius: 8,
-                  background: busy ? "rgba(44,26,14,0.35)" : B.ink, border: "none", color: "#FAF6EE",
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
-                  cursor: busy ? "wait" : "pointer",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                  marginBottom: 9, transition: "background 0.15s",
-                }}>
-                  <Icon d={IC.plus} size={13} color="#FAF6EE" sw={2.2} />
-                  Create Room
-                </button>
-
-                <form onSubmit={handleJoin} style={{ display: "flex", gap: 6 }}>
-                  <input
-                    value={joinCode}
-                    onChange={e => { setJoinCode(e.target.value.toUpperCase()); setJoinErr(""); }}
-                    placeholder="ROOM CODE"
-                    maxLength={8}
-                    style={{
-                      flex: 1, padding: "8px 10px", borderRadius: 7,
-                      border: `1px solid ${joinErr ? "#C0624A" : B.border}`,
-                      background: "rgba(255,255,255,0.6)",
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.ink,
-                      letterSpacing: 1.8, outline: "none", boxSizing: "border-box",
-                    }}
-                  />
-                  <button type="submit" disabled={busy} style={{
-                    padding: "8px 13px", borderRadius: 7,
-                    border: `1px solid ${B.border}`, background: B.goldBg,
-                    color: B.gold, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
-                    cursor: "pointer",
-                  }}>Join</button>
-                </form>
-                {joinErr && <p style={{ margin: "5px 0 0", fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#C0624A" }}>{joinErr}</p>}
+                {/* Side-by-side Create + Join */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 9 }}>
+                  <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setPendingCreatePropertyId(null); setShowCreateModal(true); }} disabled={busy} style={{
+                    flex: 1, padding: "9px 0", borderRadius: 8,
+                    background: busy ? "rgba(44,26,14,0.35)" : B.ink, border: "none", color: "#FAF6EE",
+                    fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
+                    cursor: busy ? "wait" : "pointer",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+                    transition: "background 0.15s",
+                  }}>
+                    <Icon d={IC.plus} size={13} color="#FAF6EE" sw={2.2} />
+                    Create
+                  </button>
+                  <form onSubmit={handleJoin} style={{ flex: 1, display: "flex", gap: 0, borderRadius: 8, overflow: "hidden", border: `1px solid ${joinErr ? "#C0624A" : B.border}` }}>
+                    <input
+                      value={joinCode}
+                      onChange={e => { setJoinCode(e.target.value.toUpperCase()); setJoinErr(""); }}
+                      placeholder="CODE"
+                      maxLength={8}
+                      style={{
+                        flex: 1, padding: "8px 8px", border: "none",
+                        background: "rgba(255,255,255,0.6)",
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.ink,
+                        letterSpacing: 1.8, outline: "none", boxSizing: "border-box",
+                        minWidth: 0,
+                      }}
+                    />
+                    <button type="submit" disabled={busy} style={{
+                      padding: "8px 12px", border: "none", borderLeft: `1px solid ${B.border}`,
+                      background: B.goldBg,
+                      color: B.gold, fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+                      cursor: "pointer", whiteSpace: "nowrap",
+                    }}>Join</button>
+                  </form>
+                </div>
+                {joinErr && <p style={{ margin: "0 0 4px", fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#C0624A" }}>{joinErr}</p>}
               </div>
 
               {/* Drag hint banner */}
@@ -875,30 +1017,33 @@ export default function Dashboard() {
               {/* Room cards — list with hover-to-scroll when dragging */}
               <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
                 {dragging && rooms.length > 0 && roomScrollState.canScrollUp && (
-                  <div
+                  <button
                     onMouseEnter={() => startRoomListScroll(-1)}
                     onMouseLeave={stopRoomListScroll}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') startRoomListScroll(-1); }}
+                    onKeyUp={e => { if (e.key === 'Enter' || e.key === ' ') stopRoomListScroll(); }}
                     style={{
                       position: "absolute", left: 0, right: 0, top: 0, height: 32, zIndex: 2,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       background: "linear-gradient(180deg, rgba(251,247,241,0.95) 0%, transparent 100%)",
-                      cursor: "n-resize",
+                      cursor: "n-resize", border: "none", padding: 0,
                     }}
                     title="Hover to scroll up"
                   >
                     <Icon d="M12 19V5M5 12l7-7 7 7" size={14} color={B.gold} sw={2} />
-                  </div>
+                  </button>
                 )}
                 <div
                   ref={roomsListRef}
                   style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 24px", display: "flex", flexDirection: "column", gap: 9 }}
                 >
-                {/* Create new room drop zone — same width as room cards (first item in same container) */}
+                {/* Create new room drop zone — narrower + centered */}
                 {dragging && (
                   <div
                     ref={createNewRoomRef}
                     style={{
                       flexShrink: 0, padding: "14px 15px", borderRadius: 13,
+                      maxWidth: "90%", margin: "0 auto",
                       border: dragOverRoom === CREATE_NEW_ROOM_ID
                         ? `2px solid ${B.gold}`
                         : "1.5px dashed rgba(166,124,61,0.4)",
@@ -908,7 +1053,7 @@ export default function Dashboard() {
                       boxShadow: "0 4px 16px rgba(80,50,10,0.1)",
                     }}
                   >
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: dragOverRoom === CREATE_NEW_ROOM_ID ? B.gold : "rgba(166,124,61,0.7)", marginBottom: 4 }}>
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, letterSpacing: 1.2, textTransform: "uppercase", color: dragOverRoom === CREATE_NEW_ROOM_ID ? B.gold : "rgba(166,124,61,0.7)", marginBottom: 4 }}>
                       Create new room with this property
                     </div>
                     <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.muted }}>
@@ -930,6 +1075,7 @@ export default function Dashboard() {
                     key={room.id}
                     room={room}
                     meta={roomMeta[room.id]}
+
                     isOver={dragOverRoom === room.id}
                     isAdded={!!justAdded[room.id]}
                     alreadyIn={draggedPropId ? (roomMeta[room.id]?.propIds || []).includes(draggedPropId) : false}
@@ -947,19 +1093,21 @@ export default function Dashboard() {
                 ))}
                 </div>
                 {dragging && rooms.length > 0 && roomScrollState.canScrollDown && (
-                  <div
+                  <button
                     onMouseEnter={() => startRoomListScroll(1)}
                     onMouseLeave={stopRoomListScroll}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') startRoomListScroll(1); }}
+                    onKeyUp={e => { if (e.key === 'Enter' || e.key === ' ') stopRoomListScroll(); }}
                     style={{
                       position: "absolute", left: 0, right: 0, bottom: 0, height: 48, zIndex: 2,
                       display: "flex", alignItems: "center", justifyContent: "center",
                       background: "linear-gradient(0deg, rgba(251,247,241,0.95) 0%, transparent 100%)",
-                      cursor: "s-resize",
+                      cursor: "s-resize", border: "none", padding: 0,
                     }}
                     title="Hover to scroll down and find your room"
                   >
                     <Icon d="M12 5v14M5 12l7 7 7-7" size={16} color={B.gold} sw={2} />
-                  </div>
+                  </button>
                 )}
               </div>
             </div>
@@ -969,7 +1117,10 @@ export default function Dashboard() {
       {/* ── Create Room Modal ─────────────────────────────────────────────── */}
       {showCreateModal && (
         <div
+          role="dialog"
+          aria-modal="true"
           onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); } }}
+          onKeyDown={e => { if (e.key === 'Escape') { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); } }}
           style={{
             position: "fixed", inset: 0, zIndex: 200,
             background: "rgba(16,10,4,0.55)", backdropFilter: "blur(6px)",
@@ -988,11 +1139,11 @@ export default function Dashboard() {
             {/* Modal header */}
             <div style={{ padding: "22px 24px 0", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
               <div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 600, letterSpacing: 2.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
                   Collaborative
                 </div>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 400, color: B.ink }}>
-                  {createdRoom ? "Room Created" : pendingCreatePropertyId ? "Name Your New Room" : "Create a Room"}
+                  {modalTitle()}
                 </div>
               </div>
               <button
@@ -1004,55 +1155,7 @@ export default function Dashboard() {
             </div>
 
             <div style={{ padding: "18px 24px 24px" }}>
-              {!createdRoom ? (
-                /* ── Step 1: Name the room ── */
-                <>
-                  <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
-                    {pendingCreatePropertyId
-                      ? `Create a new room with ${PROPERTIES.find(p => p.id === pendingCreatePropertyId)?.title || "this property"}. Give it a name and we'll add the property automatically.`
-                      : "Give your room a name. You can invite roommates with the code once it's created."}
-                  </p>
-                  <input
-                    autoFocus
-                    value={newRoomName}
-                    onChange={e => setNewRoomName(e.target.value)}
-                    onKeyDown={e => {
-                      if (e.key === "Enter" && newRoomName.trim()) {
-                        pendingCreatePropertyId ? handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId) : handleCreateRoom(newRoomName);
-                      }
-                    }}
-                    placeholder="e.g. Irvine Summer Hunt"
-                    maxLength={48}
-                    style={{
-                      width: "100%", padding: "11px 14px", borderRadius: 10,
-                      border: `1.5px solid ${B.border}`,
-                      background: "rgba(255,255,255,0.75)",
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.ink,
-                      outline: "none", boxSizing: "border-box",
-                      transition: "border-color 0.15s",
-                    }}
-                    onFocus={e => { e.target.style.borderColor = B.gold; }}
-                    onBlur={e => { e.target.style.borderColor = B.border; }}
-                  />
-                  <button
-                    onClick={() => pendingCreatePropertyId ? handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId) : handleCreateRoom(newRoomName)}
-                    disabled={busy || !newRoomName.trim()}
-                    style={{
-                      marginTop: 12, width: "100%", padding: "11px 0", borderRadius: 10,
-                      background: (busy || !newRoomName.trim()) ? "rgba(44,26,14,0.25)" : B.ink,
-                      border: "none", color: "#FAF6EE",
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
-                      cursor: (busy || !newRoomName.trim()) ? "default" : "pointer",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
-                      transition: "background 0.15s",
-                    }}
-                  >
-                    {busy
-                      ? <><ModalSpinner />Creating…</>
-                      : <><Icon d={IC.plus} size={13} color="#FAF6EE" sw={2.2} />Create Room</>}
-                  </button>
-                </>
-              ) : (
+              {createdRoom ? (
                 /* ── Step 2: Show code + share ── */
                 <>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, padding: "12px 14px", borderRadius: 12, background: "rgba(92,138,107,0.08)", border: "1.5px solid rgba(92,138,107,0.2)" }}>
@@ -1169,6 +1272,54 @@ export default function Dashboard() {
                     Done
                   </button>
                 </>
+              ) : (
+                /* ── Step 1: Name the room ── */
+                <>
+                  <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
+                    {pendingCreatePropertyId
+                      ? `Create a new room with ${PROPERTIES.find(p => p.id === pendingCreatePropertyId)?.title || "this property"}. Give it a name and we'll add the property automatically.`
+                      : "Give your room a name. You can invite roommates with the code once it's created."}
+                  </p>
+                  <input
+                    autoFocus
+                    value={newRoomName}
+                    onChange={e => setNewRoomName(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && newRoomName.trim()) {
+                        pendingCreatePropertyId ? handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId) : handleCreateRoom(newRoomName);
+                      }
+                    }}
+                    placeholder="e.g. Irvine Summer Hunt"
+                    maxLength={48}
+                    style={{
+                      width: "100%", padding: "11px 14px", borderRadius: 10,
+                      border: `1.5px solid ${B.border}`,
+                      background: "rgba(255,255,255,0.75)",
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.ink,
+                      outline: "none", boxSizing: "border-box",
+                      transition: "border-color 0.15s",
+                    }}
+                    onFocus={e => { e.target.style.borderColor = B.gold; }}
+                    onBlur={e => { e.target.style.borderColor = B.border; }}
+                  />
+                  <button
+                    onClick={() => pendingCreatePropertyId ? handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId) : handleCreateRoom(newRoomName)}
+                    disabled={busy || !newRoomName.trim()}
+                    style={{
+                      marginTop: 12, width: "100%", padding: "11px 0", borderRadius: 10,
+                      background: (busy || !newRoomName.trim()) ? "rgba(44,26,14,0.25)" : B.ink,
+                      border: "none", color: "#FAF6EE",
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+                      cursor: (busy || !newRoomName.trim()) ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                      transition: "background 0.15s",
+                    }}
+                  >
+                    {busy
+                      ? <><ModalSpinner />Creating…</>
+                      : <><Icon d={IC.plus} size={13} color="#FAF6EE" sw={2.2} />Create Room</>}
+                  </button>
+                </>
               )}
             </div>
           </div>
@@ -1197,45 +1348,53 @@ export default function Dashboard() {
   );
 }
 
+/* ── Room card style helpers (avoid nested ternaries) ─────────────────────── */
+function roomCardBorder(isOver, isAdded, draggingActive) {
+  if (isOver) return `2px solid ${B.gold}`;
+  if (isAdded) return `2px solid #4A7C59`;
+  if (draggingActive) return `2px dashed rgba(166,124,61,0.45)`;
+  return `1px solid ${B.border}`;
+}
+function roomCardBg(isOver, isAdded, draggingActive) {
+  if (isOver) return "rgba(166,124,61,0.08)";
+  if (isAdded) return "rgba(74,124,89,0.07)";
+  if (draggingActive) return "rgba(255,255,255,0.9)";
+  return "rgba(255,255,255,0.72)";
+}
+function roomCardShadow(isOver, isAdded, draggingActive) {
+  if (isOver) return `0 6px 28px rgba(166,124,61,0.22)`;
+  if (isAdded) return `0 4px 20px rgba(74,124,89,0.14)`;
+  if (draggingActive) return `0 4px 16px rgba(80,50,10,0.1)`;
+  return "0 1px 6px rgba(80,50,10,0.05)";
+}
+
 /* ── Room Drop Card ────────────────────────────────────────────────────────── */
 function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingActive, setRef, onOpen }) {
   const thumbIds = (meta.propIds || []).slice(0, 4);
+  const [hovered, setHovered] = useState(false);
   return (
     <div
       ref={setRef}
+      onClick={() => { if (!draggingActive) onOpen(); }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         flexShrink: 0,
-        minHeight: 120,
+        minHeight: (draggingActive || isOver) ? 130 : 120,
         borderRadius: 13,
-        border: isOver
-          ? `2px solid ${B.gold}`
-          : isAdded
-          ? `2px solid #4A7C59`
-          : draggingActive
-          ? `1.5px dashed rgba(166,124,61,0.45)`
-          : `1px solid ${B.border}`,
-        background: isOver
-          ? "rgba(166,124,61,0.08)"
-          : isAdded
-          ? "rgba(74,124,89,0.07)"
-          : draggingActive
-          ? "rgba(255,255,255,0.9)"
-          : "rgba(255,255,255,0.72)",
+        border: "none",
+        borderLeft: isOver ? `4px solid ${B.gold}` : isAdded ? "4px solid #4A7C59" : `4px solid ${B.muted}`,
+        background: roomCardBg(isOver, isAdded, draggingActive),
         backdropFilter: "blur(10px)",
-        padding: "14px 15px",
-        paddingBottom: draggingActive ? 22 : 14,
+        padding: (draggingActive || isOver) ? "14px 15px 22px" : "14px 15px",
         cursor: draggingActive ? "copy" : "pointer",
-        transition: "all 0.2s cubic-bezier(.16,1,.3,1)",
+        transition: "border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.18s cubic-bezier(.34,1.56,.64,1)",
         position: "relative",
         overflow: "hidden",
-        transform: isOver ? "scale(1.025)" : draggingActive ? "scale(1.005)" : "scale(1)",
-        boxShadow: isOver
-          ? `0 6px 28px rgba(166,124,61,0.22)`
-          : isAdded
-          ? `0 4px 20px rgba(74,124,89,0.14)`
-          : draggingActive
-          ? `0 4px 16px rgba(80,50,10,0.1)`
-          : "0 1px 6px rgba(80,50,10,0.05)",
+        transform: hovered && !draggingActive ? "scale(1.025)" : "scale(1)",
+        boxShadow: hovered && !draggingActive
+          ? "0 6px 24px rgba(80,50,10,0.13)"
+          : roomCardShadow(isOver, isAdded, draggingActive),
       }}
     >
       {/* Overlays */}
@@ -1270,24 +1429,14 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
         <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: B.muted, letterSpacing: 2 }}>
           {room.room_code}
         </div>
-        <button
-          onClick={e => { e.stopPropagation(); onOpen(); }}
-          style={{
-            display: "flex", alignItems: "center", gap: 4,
-            padding: "4px 10px", borderRadius: 7,
-            background: B.goldBg, border: `1px solid ${B.border}`,
-            fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, color: B.gold,
-            cursor: "pointer",
-          }}
-        >
-          Open <Icon d="M9 18l6-6-6-6" size={10} color={B.gold} sw={2.2} />
-        </button>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.gold} strokeWidth="2.2" strokeLinecap="round" style={{ opacity: 0.6, flexShrink: 0 }}><path d="M9 18l6-6-6-6"/></svg>
       </div>
 
       <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginBottom: thumbIds.length > 0 ? 9 : 0 }}>
         {meta.memberCount ?? 0} {meta.memberCount === 1 ? "member" : "members"}
         <span style={{ margin: "0 5px", opacity: 0.4 }}>·</span>
         {meta.propertyCount ?? 0} {meta.propertyCount === 1 ? "property" : "properties"}
+
       </div>
 
       {/* Property thumbnails */}
@@ -1323,6 +1472,26 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
     </div>
   );
 }
+
+RoomDropCard.propTypes = {
+  room: PropTypes.shape({
+    id: PropTypes.string,
+    name: PropTypes.string,
+    room_code: PropTypes.string,
+  }).isRequired,
+  meta: PropTypes.shape({
+    memberCount: PropTypes.number,
+    propertyCount: PropTypes.number,
+    propIds: PropTypes.arrayOf(PropTypes.number),
+  }),
+
+  isOver: PropTypes.bool,
+  isAdded: PropTypes.bool,
+  alreadyIn: PropTypes.bool,
+  draggingActive: PropTypes.bool,
+  setRef: PropTypes.func,
+  onOpen: PropTypes.func,
+};
 
 /* ── Property Card ─────────────────────────────────────────────────────────── */
 function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMouseDown, primaryImageUrl }) {
@@ -1369,6 +1538,18 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
     property.petFriendly && { icon: "pet",     label: "Pets OK" },
   ].filter(Boolean);
 
+  function cardBorderColor() {
+    if (isHighlighted) return B.gold;
+    if (hovered) return "rgba(166,124,61,0.4)";
+    return "rgba(255,255,255,0.88)";
+  }
+  function cardBoxShadow() {
+    if (isDragging) return "none";
+    if (isHighlighted) return "0 0 0 2px rgba(166,124,61,0.35), 0 8px 28px rgba(166,124,61,0.2)";
+    if (hovered) return "0 10px 32px rgba(80,50,10,0.13)";
+    return "0 2px 12px rgba(80,50,10,0.07)";
+  }
+
   return (
     <div
       ref={cardRef}
@@ -1378,15 +1559,9 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
       style={{
         borderRadius: 16, overflow: "hidden", flexShrink: 0,
         display: "flex", flexDirection: "column",
-        border: `1.5px solid ${isHighlighted ? B.gold : hovered ? "rgba(166,124,61,0.4)" : "rgba(255,255,255,0.88)"}`,
+        border: `1.5px solid ${cardBorderColor()}`,
         background: "#fff",
-        boxShadow: isDragging
-          ? "none"
-          : isHighlighted
-          ? "0 0 0 2px rgba(166,124,61,0.35), 0 8px 28px rgba(166,124,61,0.2)"
-          : hovered
-          ? "0 10px 32px rgba(80,50,10,0.13)"
-          : "0 2px 12px rgba(80,50,10,0.07)",
+        boxShadow: cardBoxShadow(),
         opacity: isDragging ? 0.22 : 1,
         transform: hovered && !isDragging ? "translateY(-2px)" : "translateY(0)",
         transition: "border-color 0.18s, box-shadow 0.18s, opacity 0.18s, transform 0.18s",
@@ -1402,7 +1577,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
           const show = i === imgIdx || i === (imgIdx + 1) % totalImgs || i === (imgIdx - 1 + totalImgs) % totalImgs;
           if (!show) return null;
           return (
-            <img key={i} src={src} alt="" draggable={false} style={{
+            <img key={src} src={src} alt="" draggable={false} style={{
               position: "absolute", inset: 0, width: "100%", height: "100%",
               objectFit: "cover",
               transition: "opacity 0.5s ease",
@@ -1432,12 +1607,12 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
           position: "absolute", top: 10, right: 10,
           padding: "3px 9px", borderRadius: 5,
           background: "rgba(12,5,2,0.58)", backdropFilter: "blur(6px)",
-          fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700,
+          fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 600,
           letterSpacing: 1.5, textTransform: "uppercase", color: "rgba(255,255,255,0.92)",
         }}>{property.category}</div>
 
         {/* ← Prev arrow */}
-        {totalImgs > 1 && hovered && displayImages.length > 0 && (
+        {totalImgs > 1 && hovered && images.length > 0 && (
           <button
             onMouseDown={e => e.stopPropagation()}
             onClick={e => goTo(-1, e)}
@@ -1482,17 +1657,23 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
           </button>
         )}
 
-        {/* Price — bottom left */}
-        <div style={{ position: "absolute", bottom: 10, left: 12 }}>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, fontWeight: 500, color: "#fff", lineHeight: 1 }}>{property.price}</div>
-        </div>
+        {/* Price badge — top left */}
+        <div style={{
+          position: "absolute", top: 10, left: 10,
+          padding: "4px 10px", borderRadius: 7,
+          background: "rgba(12,5,2,0.6)", backdropFilter: "blur(6px)",
+          fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: "#fff",
+        }}>{property.price}</div>
 
         {/* Dot indicators — bottom center-right */}
         {totalImgs > 1 && (
-          <div style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 5, alignItems: "center" }}>
-            {images.map((_, i) => (
-              <div
-                key={i}
+          <div role="tablist" style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 5, alignItems: "center" }}>
+            {images.map((src, i) => (
+              <button
+                key={`dot-${src}`}
+                aria-label={`Image ${i + 1}`}
+                aria-selected={i === imgIdx}
+                role="tab"
                 onMouseDown={e => e.stopPropagation()}
                 onClick={e => { e.stopPropagation(); setImgIdx(i); }}
                 style={{
@@ -1501,6 +1682,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
                   cursor: "pointer",
                   transition: "width 0.25s ease, background 0.2s",
                   boxShadow: i === imgIdx ? "0 0 6px rgba(255,255,255,0.5)" : "none",
+                  border: "none", padding: 0,
                 }}
               />
             ))}
@@ -1534,7 +1716,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
       {/* ── Info ── */}
       <div style={{ padding: "13px 14px 0", display: "flex", flexDirection: "column", gap: 10 }}>
         <div>
-          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 500, color: B.ink, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 400, color: B.ink, lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {property.title}
           </div>
           <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.muted, marginTop: 3 }}>
@@ -1542,19 +1724,9 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
           </div>
         </div>
 
-        {/* Stats grid */}
-        <div style={{ display: "flex", background: "rgba(166,124,61,0.05)", borderRadius: 8, overflow: "hidden", border: `1px solid rgba(166,124,61,0.1)` }}>
-          {[
-            [property.beds,                                      "Beds"],
-            [property.baths,                                    "Baths"],
-            [property.sqft ? property.sqft.toLocaleString() : "—", "Sq Ft"],
-            [property.yearBuilt || "—",                          "Built"],
-          ].map(([v, l], i, arr) => (
-            <div key={l} style={{ flex: 1, textAlign: "center", padding: "7px 0", borderRight: i < arr.length - 1 ? `1px solid rgba(166,124,61,0.12)` : "none" }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, color: B.ink, lineHeight: 1 }}>{v}</div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 7.5, fontWeight: 600, letterSpacing: 0.8, textTransform: "uppercase", color: B.muted, marginTop: 2 }}>{l}</div>
-            </div>
-          ))}
+        {/* Stats — inline separator text */}
+        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, fontWeight: 500 }}>
+          {property.beds} bd<span style={{ margin: "0 5px", opacity: 0.4 }}>·</span>{property.baths} ba<span style={{ margin: "0 5px", opacity: 0.4 }}>·</span>{property.sqft ? property.sqft.toLocaleString() : "—"} sqft
         </div>
 
         {/* Amenity chips */}
@@ -1626,7 +1798,7 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
           {images.length > 1 && (
             <div style={{ display: "flex", gap: 5, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
               {images.map((src, i) => (
-                <div key={i} style={{
+                <div key={src} style={{
                   height: 90, minWidth: i === 0 ? 160 : 120,
                   borderRadius: 9, flexShrink: 0,
                   background: `url(${src}) center/cover`,
@@ -1700,6 +1872,33 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
   );
 }
 
+PropertyCard.propTypes = {
+  property: PropTypes.shape({
+    id: PropTypes.number,
+    title: PropTypes.string,
+    price: PropTypes.string,
+    location: PropTypes.string,
+    category: PropTypes.string,
+    beds: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    baths: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    sqft: PropTypes.number,
+    yearBuilt: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
+    images: PropTypes.arrayOf(PropTypes.string),
+    tags: PropTypes.arrayOf(PropTypes.string),
+    aiOverview: PropTypes.string,
+    petFriendly: PropTypes.bool,
+    parking: PropTypes.string,
+    laundry: PropTypes.string,
+    listingUrl: PropTypes.string,
+  }).isRequired,
+  saved: PropTypes.bool,
+  isDragging: PropTypes.bool,
+  isHighlighted: PropTypes.bool,
+  onSave: PropTypes.func,
+  onMouseDown: PropTypes.func,
+  primaryImageUrl: PropTypes.string,
+};
+
 /* ── Amenity Icon (SVG, no emoji) ──────────────────────────────────────────── */
 function AmenityIcon({ type, size = 12 }) {
   const w = size, h = size;
@@ -1732,6 +1931,10 @@ function AmenityIcon({ type, size = 12 }) {
   );
   return null;
 }
+AmenityIcon.propTypes = {
+  type: PropTypes.string.isRequired,
+  size: PropTypes.number,
+};
 
 /* ── Quick Fact Icon (SVG, no emoji) ───────────────────────────────────────── */
 function QuickFactIcon({ type }) {
@@ -1761,6 +1964,9 @@ function QuickFactIcon({ type }) {
   if (type === "pet") return <AmenityIcon type="pet" size={11} />;
   return null;
 }
+QuickFactIcon.propTypes = {
+  type: PropTypes.string.isRequired,
+};
 
 /* ── Modal Spinner ──────────────────────────────────────────────────────────── */
 function ModalSpinner() {

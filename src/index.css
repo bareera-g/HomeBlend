@@ -12,8 +12,11 @@ html, body, #root {
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(166,124,61,0.25); border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(166,124,61,0.45); }
+::-webkit-scrollbar-thumb { background: rgba(167,146,119,0.3); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(167,146,119,0.5); border-radius: 10px; }
+
+/* Firefox scrollbar */
+* { scrollbar-width: thin; scrollbar-color: rgba(167,146,119,0.3) transparent; }
 
 input, button, textarea, select { font-family: inherit; }
 button { -webkit-tap-highlight-color: transparent; }

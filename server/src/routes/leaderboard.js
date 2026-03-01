@@ -51,7 +51,7 @@ router.get('/:code/leaderboard', (req, res) => {
     .filter(Boolean)
     .sort((a, b) => b.matchScore - a.matchScore);
 
-  const limit = parseInt(req.query.limit, 10) || 10;
+  const limit = Number.parseInt(req.query.limit, 10) || 10;
 
   res.json({
     leaderboard: scored.slice(0, limit),

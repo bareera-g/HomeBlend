@@ -35,8 +35,8 @@
  *     --help                    Show help
  */
 
-const fs = require('fs');
-const path = require('path');
+const fs = require('node:fs');
+const path = require('node:path');
 const { CITIES, REQUEST_DEFAULTS } = require('./config');
 
 /* ── CLI arg parsing ──────────────────────────────────────── */
@@ -64,23 +64,28 @@ function parseArgs() {
         break;
       case '--import':
         opts.mode = 'import';
-        opts.importFile = args[++i];
+        i += 1;
+        opts.importFile = args[i];
         break;
       case '--cities':
-        opts.cities = args[++i].split(',').map((s) => s.trim());
+        i += 1;
+        opts.cities = args[i].split(',').map((s) => s.trim());
         break;
       case '--limit':
-        opts.limit = parseInt(args[++i], 10);
+        i += 1;
+        opts.limit = Number.parseInt(args[i], 10);
         break;
       case '--enrich':
         opts.enrich = true;
         break;
       case '--source':
-        opts.source = args[++i];
+        i += 1;
+        opts.source = args[i];
         if (!opts.mode) opts.mode = 'scrape';
         break;
       case '--output':
-        opts.output = path.resolve(args[++i]);
+        i += 1;
+        opts.output = path.resolve(args[i]);
         break;
       case '--dry-run':
         opts.dryRun = true;
@@ -89,7 +94,8 @@ function parseArgs() {
         opts.keepOld = true;
         break;
       case '--seed':
-        opts.seed = parseInt(args[++i], 10);
+        i += 1;
+        opts.seed = Number.parseInt(args[i], 10);
         break;
       case '--frontend':
         opts.frontend = true;
@@ -191,6 +197,76 @@ async function runImport(opts) {
   return listings;
 }
 
+/* ── Source-specific scrapers ──────────────────────────────── */
+
+async function scrapeBrowser(cityConfig, opts, cityListings, stats) {
+  try {
+    const browser = require('./browser');
+    const raw = await browser.scrapeCity(cityConfig, {
+      limit: opts.limit,
+      enrichDetails: opts.enrich,
+    });
+    if (raw.length === 0) {
+      console.log(`  ○ Browser: no results`);
+      return;
+    }
+    const { transformBatch } = require('./transform');
+    const transformed = transformBatch(raw, cityConfig, 'zillow');
+    cityListings.push(...transformed);
+    stats.browser += transformed.length;
+    console.log(`  ✓ Browser: ${transformed.length} listings`);
+  } catch (err) {
+    console.log(`  ✗ Browser error: ${err.message}`);
+    stats.failed++;
+  }
+}
+
+async function scrapeZillow(cityConfig, opts, cityListings, stats) {
+  try {
+    const zillow = require('./zillow');
+    const raw = await zillow.scrapeCity(cityConfig, {
+      limit: opts.limit,
+      enrichDetails: opts.enrich,
+    });
+    if (raw.length === 0) {
+      console.log(`  ○ Zillow: no results`);
+      return;
+    }
+    const { transformBatch } = require('./transform');
+    const transformed = transformBatch(raw, cityConfig, 'zillow');
+    cityListings.push(...transformed);
+    stats.zillow += transformed.length;
+    console.log(`  ✓ Zillow: ${transformed.length} listings`);
+  } catch (err) {
+    console.log(`  ✗ Zillow error: ${err.message}`);
+    stats.failed++;
+  }
+}
+
+async function scrapeRedfin(cityConfig, opts, cityListings, stats) {
+  try {
+    const redfin = require('./redfin');
+    const remaining = opts.limit - cityListings.length;
+    const raw = await redfin.scrapeCity(cityConfig, {
+      limit: Math.max(remaining, opts.limit),
+      enrichDetails: opts.enrich,
+    });
+    if (raw.length === 0) {
+      console.log(`  ○ Redfin: no results`);
+      return;
+    }
+    const { transformBatch } = require('./transform');
+    const transformed = transformBatch(raw, cityConfig, 'redfin');
+    const take = opts.source === 'redfin' ? transformed : transformed.slice(0, remaining);
+    cityListings.push(...take);
+    stats.redfin += take.length;
+    console.log(`  ✓ Redfin: ${take.length} listings`);
+  } catch (err) {
+    console.log(`  ✗ Redfin error: ${err.message}`);
+    stats.failed++;
+  }
+}
+
 /* ── Scrape mode ──────────────────────────────────────────── */
 
 async function runScrape(opts) {
@@ -200,8 +276,8 @@ async function runScrape(opts) {
 
   let targetCities = CITIES;
   if (opts.cities) {
-    const cityNames = opts.cities.map((c) => c.toLowerCase());
-    targetCities = CITIES.filter((c) => cityNames.includes(c.city.toLowerCase()));
+    const cityNames = new Set(opts.cities.map((c) => c.toLowerCase()));
+    targetCities = CITIES.filter((c) => cityNames.has(c.city.toLowerCase()));
     if (targetCities.length === 0) {
       console.error(`No matching cities. Available: ${CITIES.map((c) => c.city).join(', ')}`);
       process.exit(1);
@@ -215,79 +291,19 @@ async function runScrape(opts) {
   const stats = { browser: 0, zillow: 0, redfin: 0, failed: 0 };
 
   for (const cityConfig of targetCities) {
-    console.log(`\n── ${cityConfig.city}, ${cityConfig.state} ${'─'.repeat(Math.max(0, 40 - cityConfig.city.length))}`);
-    let cityListings = [];
+    const divider = '─'.repeat(Math.max(0, 40 - cityConfig.city.length));
+    console.log(`\n── ${cityConfig.city}, ${cityConfig.state} ${divider}`);
+    const cityListings = [];
 
-    // Browser mode (Puppeteer)
     if (opts.source === 'browser') {
-      try {
-        const browser = require('./browser');
-        const raw = await browser.scrapeCity(cityConfig, {
-          limit: opts.limit,
-          enrichDetails: opts.enrich,
-        });
-        if (raw.length > 0) {
-          const { transformBatch } = require('./transform');
-          const transformed = transformBatch(raw, cityConfig, 'zillow');
-          cityListings.push(...transformed);
-          stats.browser += transformed.length;
-          console.log(`  ✓ Browser: ${transformed.length} listings`);
-        } else {
-          console.log(`  ○ Browser: no results`);
-        }
-      } catch (err) {
-        console.log(`  ✗ Browser error: ${err.message}`);
-        stats.failed++;
-      }
+      await scrapeBrowser(cityConfig, opts, cityListings, stats);
     }
-
-    // Zillow HTTP mode
     if (opts.source === 'zillow' || opts.source === 'both') {
-      try {
-        const zillow = require('./zillow');
-        const raw = await zillow.scrapeCity(cityConfig, {
-          limit: opts.limit,
-          enrichDetails: opts.enrich,
-        });
-        if (raw.length > 0) {
-          const { transformBatch } = require('./transform');
-          const transformed = transformBatch(raw, cityConfig, 'zillow');
-          cityListings.push(...transformed);
-          stats.zillow += transformed.length;
-          console.log(`  ✓ Zillow: ${transformed.length} listings`);
-        } else {
-          console.log(`  ○ Zillow: no results`);
-        }
-      } catch (err) {
-        console.log(`  ✗ Zillow error: ${err.message}`);
-        stats.failed++;
-      }
+      await scrapeZillow(cityConfig, opts, cityListings, stats);
     }
-
-    // Redfin HTTP mode
     const needRedfin = opts.source === 'redfin' || (opts.source === 'both' && cityListings.length < opts.limit);
     if (needRedfin) {
-      try {
-        const redfin = require('./redfin');
-        const remaining = opts.limit - cityListings.length;
-        const raw = await redfin.scrapeCity(cityConfig, {
-          limit: Math.max(remaining, opts.limit),
-          enrichDetails: opts.enrich,
-        });
-        if (raw.length > 0) {
-          const { transformBatch } = require('./transform');
-          const transformed = transformBatch(raw, cityConfig, 'redfin');
-          const take = opts.source === 'redfin' ? transformed : transformed.slice(0, remaining);
-          cityListings.push(...take);
-          stats.redfin += take.length;
-          console.log(`  ✓ Redfin: ${take.length} listings`);
-        } else {
-          console.log(`  ○ Redfin: no results`);
-        }
-      } catch (err) {
-        console.log(`  ✗ Redfin error: ${err.message}`);
-        stats.failed++;
-      }
+      await scrapeRedfin(cityConfig, opts, cityListings, stats);
     }
 
     allListings.push(...cityListings);
@@ -314,8 +330,8 @@ async function runApartments(opts) {
 
   let areas = IRVINE_AREAS;
   if (opts.cities) {
-    const cityNames = opts.cities.map((c) => c.toLowerCase());
-    areas = IRVINE_AREAS.filter((a) => cityNames.includes(a.label.toLowerCase()));
+    const cityNames = new Set(opts.cities.map((c) => c.toLowerCase()));
+    areas = IRVINE_AREAS.filter((a) => cityNames.has(a.label.toLowerCase()));
     if (areas.length === 0) {
       console.log(`No matching areas. Available: ${IRVINE_AREAS.map((a) => a.label).join(', ')}`);
       console.log('Falling back to all Irvine/OC areas.');
@@ -343,19 +359,21 @@ function writeFrontendProperties(listings) {
 
   let output = 'export const PROPERTIES = [\n';
   for (const l of listings) {
-    const escape = (s) => (s || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ');
-    const imgs = (l.images || []).map((u) => `      "${u}"`).join(',\n');
-    const tags = (l.tags || []).map((t) => `"${escape(t)}"`).join(', ');
+    const escape = (s) => (s || '').replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', ' ');
+    const imgs = (l.images || []).map((u) => '      "' + u + '"').join(',\n');
+    const tags = (l.tags || []).map((t) => '"' + escape(t) + '"').join(', ');
+    const parkingVal = l.parking ? '"' + escape(l.parking) + '"' : 'null';
+    const laundryVal = l.laundry ? '"' + escape(l.laundry) + '"' : 'null';
     output += '  {\n';
-    output += `    id: ${l.id}, title: "${escape(l.title)}", location: "${escape(l.location)}",\n`;
-    output += `    price: "${escape(l.price)}", priceNum: ${l.priceNum || 0}, category: "${escape(l.category)}",\n`;
-    output += `    beds: ${l.beds || 1}, baths: ${l.baths || 1}, sqft: ${l.sqft || 0}, yearBuilt: ${l.yearBuilt || 'null'},\n`;
-    output += `    tags: [${tags}],\n`;
-    output += `    petFriendly: ${!!l.petFriendly}, parking: ${l.parking ? `"${escape(l.parking)}"` : 'null'}, laundry: ${l.laundry ? `"${escape(l.laundry)}"` : 'null'},\n`;
-    output += `    lng: ${l.lng || -117.78}, lat: ${l.lat || 33.68},\n`;
-    output += `    images: [\n${imgs},\n    ],\n`;
-    output += `    aiOverview: "${escape(l.aiOverview)}",\n`;
-    if (l.listingUrl) output += `    listingUrl: "${escape(l.listingUrl)}",\n`;
+    output += '    id: ' + l.id + ', title: "' + escape(l.title) + '", location: "' + escape(l.location) + '",\n';
+    output += '    price: "' + escape(l.price) + '", priceNum: ' + (l.priceNum || 0) + ', category: "' + escape(l.category) + '",\n';
+    output += '    beds: ' + (l.beds || 1) + ', baths: ' + (l.baths || 1) + ', sqft: ' + (l.sqft || 0) + ', yearBuilt: ' + (l.yearBuilt || 'null') + ',\n';
+    output += '    tags: [' + tags + '],\n';
+    output += '    petFriendly: ' + (!!l.petFriendly) + ', parking: ' + parkingVal + ', laundry: ' + laundryVal + ',\n';
+    output += '    lng: ' + (l.lng || -117.78) + ', lat: ' + (l.lat || 33.68) + ',\n';
+    output += '    images: [\n' + imgs + ',\n    ],\n';
+    output += '    aiOverview: "' + escape(l.aiOverview) + '",\n';
+    if (l.listingUrl) output += '    listingUrl: "' + escape(l.listingUrl) + '",\n';
     output += '  },\n';
   }
   output += '];\n';
@@ -384,30 +402,7 @@ async function main() {
     } catch { /* start fresh */ }
   }
 
-  // Run the selected mode
-  let newListings;
-  switch (opts.mode) {
-    case 'generate':
-      newListings = await runGenerate(opts);
-      break;
-    case 'import':
-      newListings = await runImport(opts);
-      break;
-    case 'scrape':
-      if (opts.source === 'apartments') {
-        newListings = await runApartments(opts);
-      } else {
-        newListings = await runScrape(opts);
-      }
-      break;
-    default:
-      console.error(`Unknown mode: ${opts.mode}`);
-      process.exit(1);
-  }
-
-  const allListings = [...existingListings, ...newListings];
-
-  // Summary
+function printSummary(opts, newListings, existingListings, allListings) {
   console.log('══════════════════════════════════════════════');
   console.log(`  Mode:            ${opts.mode}`);
   console.log(`  New listings:    ${newListings.length}`);
@@ -416,7 +411,6 @@ async function main() {
   }
   console.log(`  Grand total:     ${allListings.length}`);
 
-  // City breakdown
   const byCity = {};
   for (const l of allListings) {
     const cityLabel = l.city || l.location || 'Unknown';
@@ -428,38 +422,72 @@ async function main() {
   }
   console.log('══════════════════════════════════════════════');
 
-  // Sample
   if (newListings.length > 0) {
-    const sample = newListings[0];
     console.log('\nSample listing:');
-    console.log(JSON.stringify(sample, null, 2).slice(0, 1000));
+    console.log(JSON.stringify(newListings[0], null, 2).slice(0, 1000));
     console.log('...\n');
   }
+}
 
-  // Write output
-  if (!opts.dryRun) {
-    const dir = path.dirname(opts.output);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(opts.output, JSON.stringify(allListings, null, 2));
-    console.log(`✓ Written ${allListings.length} listings to ${opts.output}\n`);
+function writeOutput(opts, allListings, newListings) {
+  const dir = path.dirname(opts.output);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(opts.output, JSON.stringify(allListings, null, 2));
+  console.log(`✓ Written ${allListings.length} listings to ${opts.output}\n`);
 
-    // Stats file
-    const statsPath = path.resolve(path.dirname(opts.output), 'scrape-stats.json');
-    fs.writeFileSync(statsPath, JSON.stringify({
-      scrapedAt: new Date().toISOString(),
-      mode: opts.mode,
-      newListings: newListings.length,
-      grandTotal: allListings.length,
-      citiesScraped: [...new Set(newListings.map((l) => l.city || l.location))],
-      schema: Object.keys(newListings[0] || {}),
-    }, null, 2));
+  const statsPath = path.resolve(path.dirname(opts.output), 'scrape-stats.json');
+  fs.writeFileSync(statsPath, JSON.stringify({
+    scrapedAt: new Date().toISOString(),
+    mode: opts.mode,
+    newListings: newListings.length,
+    grandTotal: allListings.length,
+    citiesScraped: [...new Set(newListings.map((l) => l.city || l.location))],
+    schema: Object.keys(newListings[0] || {}),
+  }, null, 2));
 
-    // Optionally write frontend properties.js
-    if (opts.frontend) {
-      writeFrontendProperties(allListings);
-    }
-  } else {
+  if (opts.frontend) {
+    writeFrontendProperties(allListings);
+  }
+}
+
+async function runMode(opts) {
+  switch (opts.mode) {
+    case 'generate': return runGenerate(opts);
+    case 'import':   return runImport(opts);
+    case 'scrape':
+      return opts.source === 'apartments' ? runApartments(opts) : runScrape(opts);
+    default:
+      console.error(`Unknown mode: ${opts.mode}`);
+      process.exit(1);
+  }
+}
+
+/* ── Main ─────────────────────────────────────────────────── */
+
+async function main() {
+  const opts = parseArgs();
+
+  console.log('╔══════════════════════════════════════════════╗');
+  console.log('║    HomeBlend Real Estate Data Pipeline 🏠    ║');
+  console.log('╚══════════════════════════════════════════════╝');
+
+  let existingListings = [];
+  if (opts.keepOld && fs.existsSync(opts.output)) {
+    try {
+      existingListings = JSON.parse(fs.readFileSync(opts.output, 'utf-8'));
+      console.log(`\nLoaded ${existingListings.length} existing listings to merge.`);
+    } catch { /* start fresh */ }
+  }
+
+  const newListings = await runMode(opts);
+  const allListings = [...existingListings, ...newListings];
+
+  printSummary(opts, newListings, existingListings, allListings);
+
+  if (opts.dryRun) {
     console.log('(dry run — nothing written)\n');
+  } else {
+    writeOutput(opts, allListings, newListings);
   }
 }
 

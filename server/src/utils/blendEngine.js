@@ -111,10 +111,17 @@ function computeGroupCompatibility(matrix) {
  */
 function detectConflicts(tasteVectors, userNames) {
   const userIds = Object.keys(tasteVectors);
-  const conflicts = [];
-  const sharedWins = [];
+  const conflicts = detectPairwiseConflicts(userIds, tasteVectors, userNames);
+  const sharedWins = detectSharedWins(userIds, tasteVectors);
 
-  // Pairwise conflicts
+  return {
+    conflicts: conflicts.slice(0, 6),
+    sharedWins: sharedWins.slice(0, 6),
+  };
+}
+
+function detectPairwiseConflicts(userIds, tasteVectors, userNames) {
+  const conflicts = [];
   for (let i = 0; i < userIds.length; i++) {
     for (let j = i + 1; j < userIds.length; j++) {
       const a = tasteVectors[userIds[i]];
@@ -135,8 +142,11 @@ function detectConflicts(tasteVectors, userNames) {
       }
     }
   }
+  return conflicts;
+}
 
-  // Shared wins: features everyone scores > 0.5
+function detectSharedWins(userIds, tasteVectors) {
+  const sharedWins = [];
   for (const key of FEATURE_KEYS) {
     const allHigh = userIds.every((id) => (tasteVectors[id][key] || 0) >= 0.5);
     const allLow = userIds.every((id) => (tasteVectors[id][key] || 0) <= 0.2);
@@ -149,11 +159,7 @@ function detectConflicts(tasteVectors, userNames) {
       sharedWins.push(`Nobody particularly cares about ${label}`);
     }
   }
-
-  return {
-    conflicts: conflicts.slice(0, 6),
-    sharedWins: sharedWins.slice(0, 6),
-  };
+  return sharedWins;
 }
 
 /* ── Leaderboard scoring ────────────────────────────────── */

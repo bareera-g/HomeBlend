@@ -1,6 +1,15 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
+function describeOpenAIError(status) {
+  if (status === 400) return "Invalid request to OpenAI API";
+  if (status === 401) return "OpenAI API key is invalid — check OPENAI_API_KEY in .env.local";
+  if (status === 403) return "OpenAI API key does not have access to this model";
+  if (status === 429) return "OpenAI rate limit exceeded — wait a moment and retry";
+  if (status === 500 || status === 503) return "OpenAI is temporarily unavailable — try again shortly";
+  return `OpenAI API error (${status})`;
+}
+
 function openaiProxyPlugin() {
   let apiKey = "";
 
@@ -50,14 +59,8 @@ function openaiProxyPlugin() {
 
           if (!apiRes.ok) {
             const err = await apiRes.json().catch(() => ({}));
-            const s = apiRes.status;
-            const msg = s === 400 ? "Invalid request to OpenAI API"
-                      : s === 401 ? "OpenAI API key is invalid — check OPENAI_API_KEY in .env.local"
-                      : s === 403 ? "OpenAI API key does not have access to this model"
-                      : s === 429 ? "OpenAI rate limit exceeded — wait a moment and retry"
-                      : s === 500 || s === 503 ? "OpenAI is temporarily unavailable — try again shortly"
-                      : `OpenAI API error (${s})`;
-            return json(s, { error: msg, detail: err });
+            const msg = describeOpenAIError(apiRes.status);
+            return json(apiRes.status, { error: msg, detail: err });
           }
 
           const data = await apiRes.json();

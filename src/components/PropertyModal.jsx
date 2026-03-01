@@ -1,4 +1,5 @@
 import { useState } from "react";
+import PropTypes from "prop-types";
 import { B, Icon, IC } from "../Brand.jsx";
 
 function AmenityIcon({ type }) {
@@ -34,13 +35,13 @@ export default function PropertyModal({ property, myVote, blendScore, blendReaso
     <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, width: 380, background: `linear-gradient(170deg, rgba(252,248,242,0.99) 0%, rgba(246,239,228,0.99) 100%)`, borderLeft: `1px solid ${B.border}`, boxShadow: "-12px 0 48px rgba(40,24,8,0.15)", display: "flex", flexDirection: "column", overflow: "hidden", zIndex: 30, animation: "slideInR 0.2s ease" }}>
       {/* Image */}
       <div style={{ position: "relative", height: 220, flexShrink: 0, background: "#E8E0D5", overflow: "hidden" }}>
-        {property.images.map((src, i) => <img key={i} src={src} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s", opacity: i === imgIdx ? 1 : 0 }} onError={e => { e.target.style.display = "none"; }} />)}
+        {property.images.map((src, i) => <img key={src} src={src} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", transition: "opacity 0.3s", opacity: i === imgIdx ? 1 : 0 }} onError={e => { e.target.style.display = "none"; }} />)}
         <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, zIndex: 5, width: 32, height: 32, borderRadius: "50%", background: "rgba(20,12,5,0.6)", backdropFilter: "blur(8px)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
           <Icon d={IC.x} size={14} color="#fff" sw={2} />
         </button>
         {property.images.length > 1 && (
-          <div style={{ position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 4, zIndex: 5 }}>
-            {property.images.map((_, i) => <div key={i} onClick={() => setImgIdx(i)} style={{ width: i === imgIdx ? 16 : 5, height: 5, borderRadius: 3, background: i === imgIdx ? "#fff" : "rgba(255,255,255,0.5)", cursor: "pointer", transition: "width 0.2s" }} />)}
+          <div role="tablist" aria-label="Image slides" style={{ position: "absolute", bottom: 10, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 4, zIndex: 5 }}>
+            {property.images.map((src, i) => <button key={src} role="tab" aria-selected={i === imgIdx} aria-label={`Image ${i + 1}`} onClick={() => setImgIdx(i)} style={{ width: i === imgIdx ? 16 : 5, height: 5, borderRadius: 3, background: i === imgIdx ? "#fff" : "rgba(255,255,255,0.5)", cursor: "pointer", transition: "width 0.2s", border: "none", padding: 0 }} />)}
           </div>
         )}
         {blendScore != null && (
@@ -112,3 +113,30 @@ export default function PropertyModal({ property, myVote, blendScore, blendReaso
     </div>
   );
 }
+
+AmenityIcon.propTypes = { type: PropTypes.string.isRequired };
+
+PropertyModal.propTypes = {
+  property: PropTypes.shape({
+    id: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    title: PropTypes.string,
+    price: PropTypes.string,
+    location: PropTypes.string,
+    beds: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    baths: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    sqft: PropTypes.number,
+    yearBuilt: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    images: PropTypes.arrayOf(PropTypes.string),
+    tags: PropTypes.arrayOf(PropTypes.string),
+    petFriendly: PropTypes.oneOfType([PropTypes.bool, PropTypes.string]),
+    parking: PropTypes.string,
+    laundry: PropTypes.string,
+    aiOverview: PropTypes.string,
+  }).isRequired,
+  myVote: PropTypes.number,
+  blendScore: PropTypes.number,
+  blendReason: PropTypes.string,
+  onLike: PropTypes.func.isRequired,
+  onPass: PropTypes.func.isRequired,
+  onClose: PropTypes.func.isRequired,
+};

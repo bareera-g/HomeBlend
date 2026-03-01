@@ -34,7 +34,7 @@ export function extractFeatures(property) {
     inUnitLaundry:  property.laundry === "In-unit" ? 1 : 0,
     highSqft:       (property.sqft ?? 0) >= 1200 ? 1 : 0,
     newBuild:       (property.yearBuilt ?? 0) >= 2015 ? 1 : 0,
-    budgetFriendly: (property.priceNum ?? property.price?.replace(/[^0-9]/g, "") * 1 ?? 9999) <= 3200 ? 1 : 0,
+    budgetFriendly: (property.priceNum ?? (Number(property.price?.replaceAll(/\D/g, "")) || 9999)) <= 3200 ? 1 : 0,
     moreBeds:       (property.beds ?? 0) >= 3 ? 1 : 0,
   };
 }
@@ -86,7 +86,11 @@ export function scoreProperties(properties, votes) {
   return properties
     .map(p => {
       const propVotes = votes.filter(v => v.property_id === p.id);
-      const score     = propVotes.reduce((s, v) => s + (v.vote === 1 ? 1 : v.vote === -1 ? -1 : 0), 0);
+      const score     = propVotes.reduce((s, v) => {
+        if (v.vote === 1) return s + 1;
+        if (v.vote === -1) return s - 1;
+        return s;
+      }, 0);
       const likes     = propVotes.filter(v => v.vote === 1).length;
       const dislikes  = propVotes.filter(v => v.vote === -1).length;
       return { property: p, score, likes, dislikes, totalVoters: propVotes.length };
@@ -114,7 +118,7 @@ export function buildMemberInsights(userId, votes, properties, tasteVec) {
 
   if (liked.length > 0) {
     const avgPrice = liked.reduce((s, p) => {
-      const n = p.priceNum ?? parseInt(p.price?.replace(/[^0-9]/g, "") || "0");
+      const n = p.priceNum ?? Number.parseInt(p.price?.replaceAll(/\D/g, "") || "0");
       return s + n;
     }, 0) / liked.length;
     if (avgPrice > 0) bullets.push(`Average liked price: $${Math.round(avgPrice).toLocaleString()}/mo.`);

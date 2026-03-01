@@ -271,6 +271,27 @@ export async function fetchMembers(roomId) {
 }
 
 // ── Room Properties ─────────────────────────────────────────────────────────
+export async function renameRoom(roomId, newName) {
+  guard();
+  await updateDoc(doc(db, "rooms", roomId), { name: newName || "My Room" });
+}
+
+export async function removeMember(roomId, userId) {
+  guard();
+  const batch = writeBatch(db);
+  batch.delete(doc(db, "rooms", roomId, "members", userId));
+
+  const userRoomsRef = doc(db, "user_rooms", userId);
+  const snap = await getDoc(userRoomsRef);
+  if (snap.exists()) {
+    const rooms = { ...(snap.data().rooms || {}) };
+    delete rooms[roomId];
+    if (Object.keys(rooms).length === 0) batch.delete(userRoomsRef);
+    else batch.set(userRoomsRef, { rooms });
+  }
+  await batch.commit();
+}
+
 export async function addPropertyToRoom(roomId, propertyId, userId) {
   guard();
   const pid = Number(propertyId);
@@ -388,6 +409,50 @@ export async function respondToJoinRequest(roomId, userId, accept) {
 }
 
 // ── Realtime (Firestore onSnapshot) ──────────────────────────────────────────
+
+/** Delete a room and all its subcollections. Owner-only; caller should verify. */
+export async function deleteRoom(roomId) {
+  guard();
+  // 1. Fetch all members so we can clean each user's user_rooms doc
+  const membersSnap = await getDocs(collection(db, "rooms", roomId, "members"));
+  const memberIds = membersSnap.docs.map(d => d.id);
+
+  // 2. Fetch the room to get the room_code for cleanup
+  const roomSnap = await getDoc(doc(db, "rooms", roomId));
+  const roomCode = roomSnap.exists() ? roomSnap.data().room_code : null;
+
+  // 3. Delete subcollections: members, properties, votes, join_requests
+  const subcolNames = ["members", "properties", "votes", "join_requests"];
+  for (const sub of subcolNames) {
+    const snap = await getDocs(collection(db, "rooms", roomId, sub));
+    if (snap.docs.length > 0) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+    }
+  }
+
+  // 4. Remove room from each member's user_rooms
+  for (const uid of memberIds) {
+    const urRef = doc(db, "user_rooms", uid);
+    const urSnap = await getDoc(urRef);
+    if (urSnap.exists()) {
+      const rooms = { ...(urSnap.data().rooms || {}) };
+      delete rooms[roomId];
+      if (Object.keys(rooms).length === 0) await deleteDoc(urRef);
+      else await setDoc(urRef, { rooms });
+    }
+  }
+
+  // 5. Delete room_code mapping
+  if (roomCode) {
+    await deleteDoc(doc(db, "room_codes", roomCode)).catch(() => {});
+  }
+
+  // 6. Delete the room document itself
+  await deleteDoc(doc(db, "rooms", roomId));
+}
+
 export function subscribeToRoom(roomId, { onVotes, onProperties, onMembers } = {}) {
   if (!db) return null;
   const unsubs = [];

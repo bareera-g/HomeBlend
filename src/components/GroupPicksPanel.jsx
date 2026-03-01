@@ -1,4 +1,5 @@
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
+import PropTypes from "prop-types";
 import { B } from "../Brand.jsx";
 import { generateGroupPicksWithOverview, isLLMReady } from "../lib/llm.js";
 
@@ -36,7 +37,7 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
   // ── Auto-trigger LLM when votes stabilise ──────────────────────────────
   useEffect(() => {
     if (!isLLMReady || !hasVotes || catalog.length === 0) return;
-    const key = JSON.stringify(votes.map(v => `${v.user_id}:${v.property_id}:${v.vote}`).sort());
+    const key = JSON.stringify(votes.map(v => `${v.user_id}:${v.property_id}:${v.vote}`).sort((a, b) => a.localeCompare(b)));
     if (key === votesKeyRef.current) return;
     votesKeyRef.current = key;
     const t = setTimeout(() => runLLM(), 4000);
@@ -87,7 +88,7 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
           </svg>
         </div>
         <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: B.ink, marginBottom: 8 }}>No properties to rank</div>
-        <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.7, maxWidth: 240 }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.muted, lineHeight: 1.7, maxWidth: 240 }}>
           Add properties to the room and cast votes — AI will curate personalized picks and explain why each fits your group.
         </div>
       </div>
@@ -101,13 +102,13 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
       <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(255,255,255,0.6)" }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
           <div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
               AI · Curated for You
             </div>
-            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 24, fontWeight: 400, color: B.ink, lineHeight: 1.1 }}>
+            <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 400, color: B.ink, lineHeight: 1.1 }}>
               Group Picks
             </div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.muted, marginTop: 4 }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, marginTop: 4 }}>
               Personalized picks based on your group's votes
             </div>
           </div>
@@ -165,6 +166,17 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
   );
 }
 
+GroupPicksPanel.propTypes = {
+  members: PropTypes.arrayOf(PropTypes.object),
+  votes: PropTypes.arrayOf(PropTypes.shape({
+    user_id: PropTypes.string,
+    property_id: PropTypes.string,
+    vote: PropTypes.number,
+  })),
+  properties: PropTypes.arrayOf(PropTypes.object),
+  allProperties: PropTypes.arrayOf(PropTypes.object),
+};
+
 /** Compact, collapsible overview — default: 1-line teaser, expand for full insight */
 function OverviewInsight({ overview }) {
   const [expanded, setExpanded] = useState(false);
@@ -184,10 +196,10 @@ function OverviewInsight({ overview }) {
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
               Your group's blend
             </div>
-            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.5 }}>
+            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.ink, lineHeight: 1.5 }}>
               {teaser}
             </p>
           </div>
@@ -199,18 +211,25 @@ function OverviewInsight({ overview }) {
       {expanded && (
         <div style={{ marginTop: 8, padding: "12px 16px", borderRadius: 10, background: "rgba(255,255,255,0.7)", border: `1px solid ${B.border}` }}>
           <div style={{ marginBottom: 10 }}>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: B.gold, marginBottom: 4 }}>What you have in common</div>
-            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.6 }}>{common}</p>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: B.gold, marginBottom: 4 }}>What you have in common</div>
+            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.ink, lineHeight: 1.6 }}>{common}</p>
           </div>
           <div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: B.gold, marginBottom: 4 }}>What to look for</div>
-            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.6 }}>{looking}</p>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, letterSpacing: 1.2, color: B.gold, marginBottom: 4 }}>What to look for</div>
+            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.ink, lineHeight: 1.6 }}>{looking}</p>
           </div>
         </div>
       )}
     </div>
   );
 }
+
+OverviewInsight.propTypes = {
+  overview: PropTypes.shape({
+    commonGround: PropTypes.string,
+    lookingFor: PropTypes.string,
+  }).isRequired,
+};
 
 /** Property-dominant card with subtle one-line AI hint */
 function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
@@ -246,26 +265,26 @@ function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
             {inBlend && (
               <div style={{
                 position: "absolute", top: 8, right: 10, padding: "2px 6px", borderRadius: 4,
-                background: "rgba(74,124,89,0.9)", fontFamily: "'DM Sans', sans-serif", fontSize: 7, fontWeight: 700, color: "#fff",
+                background: "rgba(74,124,89,0.9)", fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: "#fff",
               }}>
                 In blend
               </div>
             )}
             <div style={{ position: "absolute", bottom: 8, left: 10, right: 10 }}>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 16, fontWeight: 600, color: "#fff", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{property.title}</div>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, marginTop: 2 }}>{property.price}</div>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 600, color: "#fff", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{property.title}</div>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: B.gold, marginTop: 2 }}>{property.price}</div>
             </div>
           </div>
           <div style={{ padding: "10px 12px" }}>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, marginBottom: 4 }}>{property.location}</div>
-            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.ink, marginBottom: 6 }}>{property.beds} bd · {property.baths} ba · {property.sqft?.toLocaleString()} sqft</div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, color: B.muted, marginBottom: 4 }}>{property.location}</div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink, marginBottom: 6 }}>{property.beds} bd · {property.baths} ba · {property.sqft?.toLocaleString()} sqft</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
               {(property.tags || []).slice(0, 3).map(t => (
-                <span key={t} style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(166,124,61,0.1)", fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 600, color: B.gold }}>{t}</span>
+                <span key={t} style={{ padding: "2px 7px", borderRadius: 4, background: "rgba(166,124,61,0.1)", fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600, color: B.gold }}>{t}</span>
               ))}
             </div>
             {listingLink(property) && (
-              <a href={listingLink(property)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 700, color: B.gold, textDecoration: "none" }}>
+              <a href={listingLink(property)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, textDecoration: "none" }}>
                 View Listing
                 <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
               </a>
@@ -277,12 +296,12 @@ function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
       {aiSuggestion && (
         <div style={{ padding: "8px 12px 10px", borderTop: `1px solid ${B.border}`, background: "rgba(166,124,61,0.03)" }}>
           <button onClick={() => setShowFull(!showFull)} style={{ width: "100%", textAlign: "left", border: "none", background: "none", cursor: "pointer", padding: 0 }}>
-            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: B.gold, marginRight: 6 }}>Why we picked this</span>
-            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.ink, fontStyle: "italic", lineHeight: 1.4 }}>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, marginRight: 6 }}>Why we picked this</span>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink, fontStyle: "italic", lineHeight: 1.4 }}>
               {showFull ? aiSuggestion : teaser}
             </span>
             {aiSuggestion.length > 100 && (
-              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.gold, marginLeft: 4 }}>{showFull ? " Show less" : " Show more"}</span>
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.gold, marginLeft: 4 }}>{showFull ? " Show less" : " Show more"}</span>
             )}
           </button>
         </div>
@@ -290,6 +309,24 @@ function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
     </div>
   );
 }
+
+PropertyPickCard.propTypes = {
+  property: PropTypes.shape({
+    id: PropTypes.string,
+    title: PropTypes.string,
+    price: PropTypes.string,
+    location: PropTypes.string,
+    beds: PropTypes.number,
+    baths: PropTypes.number,
+    sqft: PropTypes.number,
+    images: PropTypes.arrayOf(PropTypes.string),
+    tags: PropTypes.arrayOf(PropTypes.string),
+    listingUrl: PropTypes.string,
+  }).isRequired,
+  aiSuggestion: PropTypes.string,
+  inBlend: PropTypes.bool,
+  idx: PropTypes.number.isRequired,
+};
 
 function SparkIcon() {
   return (

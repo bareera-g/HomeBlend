@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import PropTypes from "prop-types";
 import { B, Icon, IC } from "../Brand.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -47,20 +48,15 @@ const AmenityIcon = memo(function AmenityIcon({ type, size = 14 }) {
   return null;
 });
 
-/* ── Auto-scroll speed (px / second) ── */
-const SCROLL_PX_PER_SEC = 30;
-const SCROLL_PAUSE_MS   = 1800;    // pause after user interacts
+AmenityIcon.propTypes = {
+  type: PropTypes.string.isRequired,
+  size: PropTypes.number,
+};
 
 export default function PropertyExpandModal({ property, saved, onSave, onClose }) {
   const [imgIdx, setImgIdx] = useState(0);
   const [closing, setClosing] = useState(false);
   const totalImgs = property.images?.length || 0;
-
-  const scrollRef  = useRef(null);   // scrollable content area
-  const rafRef     = useRef(null);   // rAF handle
-  const lastTRef   = useRef(0);      // previous timestamp
-  const pausedRef  = useRef(false);  // user-interaction pause flag
-  const pauseTmRef = useRef(null);   // timeout to resume after pause
 
   const close = useCallback(() => {
     setClosing(true);
@@ -74,60 +70,14 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
       else if (e.key === "ArrowLeft")  setImgIdx(i => (i - 1 + totalImgs) % totalImgs);
       else if (e.key === "ArrowRight") setImgIdx(i => (i + 1) % totalImgs);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    globalThis.addEventListener("keydown", handler);
+    return () => globalThis.removeEventListener("keydown", handler);
   }, [close, totalImgs]);
 
   // Lock body scroll while modal is open
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
-  }, []);
-
-  /* ── rAF auto-scroll ──────────────────────────────────────────────── */
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-
-    const tick = (ts) => {
-      if (!lastTRef.current) lastTRef.current = ts;
-      const dt = (ts - lastTRef.current) / 1000;
-      lastTRef.current = ts;
-
-      if (!pausedRef.current) {
-        const maxScroll = el.scrollHeight - el.clientHeight;
-        if (maxScroll > 0) {
-          el.scrollTop += SCROLL_PX_PER_SEC * dt;
-          // Loop back to top when we hit the bottom
-          if (el.scrollTop >= maxScroll) el.scrollTop = 0;
-        }
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    // Small delay before starting scroll so the entrance anim finishes
-    const startTimer = setTimeout(() => {
-      rafRef.current = requestAnimationFrame(tick);
-    }, 600);
-
-    // Pause while user interacts, resume after SCROLL_PAUSE_MS
-    const pause = () => {
-      pausedRef.current = true;
-      clearTimeout(pauseTmRef.current);
-      pauseTmRef.current = setTimeout(() => { pausedRef.current = false; }, SCROLL_PAUSE_MS);
-    };
-    el.addEventListener("wheel",      pause, { passive: true });
-    el.addEventListener("touchstart", pause, { passive: true });
-    el.addEventListener("pointerdown", pause);
-
-    return () => {
-      clearTimeout(startTimer);
-      cancelAnimationFrame(rafRef.current);
-      clearTimeout(pauseTmRef.current);
-      el.removeEventListener("wheel",      pause);
-      el.removeEventListener("touchstart", pause);
-      el.removeEventListener("pointerdown", pause);
-    };
   }, []);
 
   /* ── Memoised derivations ─────────────────────────────────────────── */
@@ -147,7 +97,10 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
       onClick={e => { if (e.target === e.currentTarget) close(); }}
+      onKeyDown={e => { if (e.key === 'Escape') close(); }}
       style={{
         position: "fixed", inset: 0, zIndex: 200,
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -268,15 +221,20 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
 
           {/* Dot indicators */}
           {totalImgs > 1 && (
-            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 6, alignItems: "center" }}>
-              {property.images.map((_, i) => (
-                <div
-                  key={i} onClick={() => setImgIdx(i)}
+            <div role="tablist" style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 6, alignItems: "center" }}>
+              {property.images.map((src, i) => (
+                <button
+                  key={`dot-${src}`}
+                  role="tab"
+                  aria-label={`Image ${i + 1}`}
+                  aria-selected={i === imgIdx}
+                  onClick={() => setImgIdx(i)}
                   style={{
                     width: i === imgIdx ? 22 : 7, height: 7, borderRadius: 4,
                     background: i === imgIdx ? "#fff" : "rgba(255,255,255,0.5)",
                     cursor: "pointer", transition: "width 0.25s ease, background 0.2s",
                     boxShadow: i === imgIdx ? "0 0 8px rgba(255,255,255,0.5)" : "none",
+                    border: "none", padding: 0,
                   }}
                 />
               ))}
@@ -316,7 +274,7 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
         </div>
 
         {/* ── Scrollable content below hero ── */}
-        <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 0 10px", scrollBehavior: "auto" }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "0 0 10px" }}>
 
           {/* Title + location header */}
           <div style={{ padding: "20px 28px 16px", borderBottom: `1px solid ${B.border}` }}>
@@ -414,7 +372,7 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
               <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 4 }}>
                 {property.images.map((src, i) => (
                   <div
-                    key={i}
+                    key={src}
                     onClick={() => setImgIdx(i)}
                     style={{
                       height: 72, minWidth: i === 0 ? 130 : 100,
@@ -458,3 +416,27 @@ export default function PropertyExpandModal({ property, saved, onSave, onClose }
     </div>
   );
 }
+
+PropertyExpandModal.propTypes = {
+  property: PropTypes.shape({
+    id: PropTypes.string,
+    title: PropTypes.string,
+    price: PropTypes.string,
+    location: PropTypes.string,
+    category: PropTypes.string,
+    beds: PropTypes.number,
+    baths: PropTypes.number,
+    sqft: PropTypes.number,
+    yearBuilt: PropTypes.oneOfType([PropTypes.string, PropTypes.number]),
+    images: PropTypes.arrayOf(PropTypes.string),
+    tags: PropTypes.arrayOf(PropTypes.string),
+    parking: PropTypes.string,
+    laundry: PropTypes.string,
+    petFriendly: PropTypes.bool,
+    aiOverview: PropTypes.string,
+    listingUrl: PropTypes.string,
+  }).isRequired,
+  saved: PropTypes.bool,
+  onSave: PropTypes.func,
+  onClose: PropTypes.func.isRequired,
+};

@@ -19,7 +19,7 @@ function filterByConstraints(allListings, constraints) {
     if (l.baths < constraints.bathsMin) return false;
 
     // Hard-no features: e.g. ["no_parking"] means exclude listings without parking
-    if (constraints.hardNo && constraints.hardNo.length) {
+    if (constraints.hardNo?.length) {
       for (const rule of constraints.hardNo) {
         const featureKey = rule.replace('no_', '');
         if (l.features[featureKey] === 0) return false;
@@ -36,8 +36,8 @@ router.get('/:code/listings', (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   const userId = req.query.userId;
-  const cursor = parseInt(req.query.cursor, 10) || 0;
-  const limit = parseInt(req.query.limit, 10) || 10;
+  const cursor = Number.parseInt(req.query.cursor, 10) || 0;
+  const limit = Number.parseInt(req.query.limit, 10) || 10;
 
   let pool = filterByConstraints(listings, session.constraints);
 
