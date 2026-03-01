@@ -109,7 +109,7 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
               Group Picks
             </div>
             <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.muted, marginTop: 4 }}>
-              10 picks from 65 locations — chosen for your group with brief AI justifications.
+              Personalized picks based on your group's votes
             </div>
           </div>
           {isLLMReady && hasVotes && (
@@ -127,157 +127,21 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
         {llmError && <div style={{ marginTop: 8, fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: "#C0624A" }}>{llmError}</div>}
       </div>
 
-      {/* ── AI Overview (common ground + looking for) ─────────────────────── */}
+      {/* ── AI Overview: compact, collapsible insight ──────────────────────── */}
       {llmData?.overview && (
-        <div style={{
-          margin: "16px 20px 0", padding: "18px 20px",
-          borderRadius: 16, overflow: "hidden",
-          background: "linear-gradient(135deg, rgba(166,124,61,0.08) 0%, rgba(166,124,61,0.04) 100%)",
-          border: "1px solid rgba(166,124,61,0.2)",
-          boxShadow: "0 4px 20px rgba(44,26,14,0.06)",
-        }}>
-          <div style={{ display: "flex", alignItems: "flex-start", gap: 20 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: B.gold, marginBottom: 8 }}>
-                What You Have in Common
-              </div>
-              <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, color: B.ink, lineHeight: 1.7 }}>
-                {llmData.overview.commonGround}
-              </p>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: B.gold, marginBottom: 8 }}>
-                What to Look For
-              </div>
-              <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 12.5, color: B.ink, lineHeight: 1.7 }}>
-                {llmData.overview.lookingFor}
-              </p>
-            </div>
-          </div>
-        </div>
+        <OverviewInsight overview={llmData.overview} />
       )}
 
-      {/* ── 10 Picks: 50-50 split, location-focused cards ─────────────────── */}
+      {/* ── 10 Picks: property-dominant cards with subtle AI insight ───────── */}
       <div style={{
         flex: 1, minHeight: 0, overflowY: "auto", overflowX: "hidden",
         padding: "18px 20px 40px",
-        display: "flex", flexDirection: "column", gap: 18,
+        display: "flex", flexDirection: "column", gap: 14,
         WebkitOverflowScrolling: "touch",
       }}>
         {picksWithProps.length > 0 ? (
           picksWithProps.map(({ property, aiSuggestion, inBlend }, idx) => (
-            <div
-              key={property.id}
-              style={{
-                flexShrink: 0,
-                height: 220,
-                borderRadius: 16,
-                overflow: "hidden",
-                border: `1px solid ${B.border}`,
-                background: "#fff",
-                boxShadow: "0 4px 16px rgba(40,24,8,0.08), 0 1px 3px rgba(40,24,8,0.04)",
-                display: "flex",
-              }}
-            >
-              {/* Left 50%: Location — hero focus */}
-              <div style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-                background: "#fff",
-              }}>
-                <div style={{ position: "relative", height: 120, flexShrink: 0 }}>
-                  <img
-                    src={property.images?.[0]}
-                    alt={property.title}
-                    style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-                  />
-                  <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(16,10,4,0.65) 0%, rgba(16,10,4,0.15) 50%, transparent 100%)" }} />
-                  <div style={{
-                    position: "absolute", top: 10, left: 12,
-                    width: 28, height: 28, borderRadius: "50%",
-                    background: idx === 0 ? B.gold : "rgba(255,255,255,0.95)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 800,
-                    color: idx === 0 ? "#FAF6EE" : B.ink,
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
-                  }}>
-                    {idx + 1}
-                  </div>
-                  {inBlend && (
-                    <div style={{
-                      position: "absolute", top: 10, right: 12,
-                      padding: "3px 8px", borderRadius: 6,
-                      background: "rgba(92,138,107,0.95)",
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, color: "#fff",
-                      letterSpacing: 0.5,
-                    }}>
-                      In blend
-                    </div>
-                  )}
-                  <div style={{ position: "absolute", bottom: 10, left: 12, right: 12 }}>
-                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 17, fontWeight: 600, color: "#fff", lineHeight: 1.2, textShadow: "0 1px 4px rgba(0,0,0,0.4)" }}>
-                      {property.title}
-                    </div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 700, color: B.gold, marginTop: 2 }}>
-                      {property.price}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ padding: "12px 14px", flex: 1, minHeight: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                  <div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginBottom: 6 }}>
-                      {property.location}
-                    </div>
-                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.ink, marginBottom: 8 }}>
-                      {property.beds} bd · {property.baths} ba · {property.sqft?.toLocaleString()} sqft
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {(property.tags || []).slice(0, 3).map(t => (
-                        <span key={t} style={{ padding: "2px 8px", borderRadius: 6, background: "rgba(166,124,61,0.12)", fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 600, color: B.gold }}>
-                          {t}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <a
-                    href={apartmentsUrl(property)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: 5,
-                      fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700,
-                      color: B.gold, textDecoration: "none",
-                      padding: "4px 0",
-                    }}
-                  >
-                    View on Apartments.com
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                    </svg>
-                  </a>
-                </div>
-              </div>
-
-              {/* Right 50%: AI justification — equal visual weight */}
-              <div style={{
-                flex: 1,
-                minWidth: 0,
-                padding: "16px 18px",
-                borderLeft: `1px solid ${B.border}`,
-                background: "linear-gradient(160deg, rgba(252,248,242,0.7) 0%, rgba(248,243,235,0.9) 100%)",
-                display: "flex",
-                flexDirection: "column",
-              }}>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: B.gold, marginBottom: 8 }}>
-                  Why this fits
-                </div>
-                <p style={{ margin: 0, flex: 1, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.65, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 5, WebkitBoxOrient: "vertical" }}>
-                  {aiSuggestion}
-                </p>
-              </div>
-            </div>
+            <PropertyPickCard key={property.id} property={property} aiSuggestion={aiSuggestion} inBlend={inBlend} idx={idx} />
           ))
         ) : (
           <div style={{
@@ -298,6 +162,123 @@ export default function GroupPicksPanel({ members = [], votes = [], properties: 
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Compact, collapsible overview — default: 1-line teaser, expand for full insight */
+function OverviewInsight({ overview }) {
+  const [expanded, setExpanded] = useState(false);
+  const common = overview.commonGround || "";
+  const looking = overview.lookingFor || "";
+  const truncate = (s, len = 90) => (s.length <= len ? s : s.slice(0, len).trim() + "…");
+  const teaser = [truncate(common), truncate(looking, 70)].filter(Boolean).join(" · ");
+
+  return (
+    <div style={{ margin: "12px 20px 0" }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          width: "100%", padding: "12px 16px", borderRadius: 12, border: "none", cursor: "pointer", textAlign: "left",
+          background: "rgba(166,124,61,0.06)", borderLeft: `3px solid ${B.gold}`,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
+              Your group's blend
+            </div>
+            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.5 }}>
+              {teaser}
+            </p>
+          </div>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={B.gold} strokeWidth="2" style={{ transform: expanded ? "rotate(180deg)" : "none", flexShrink: 0 }}>
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </button>
+      {expanded && (
+        <div style={{ marginTop: 8, padding: "12px 16px", borderRadius: 10, background: "rgba(255,255,255,0.7)", border: `1px solid ${B.border}` }}>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: B.gold, marginBottom: 4 }}>What you have in common</div>
+            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.6 }}>{common}</p>
+          </div>
+          <div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, letterSpacing: 1.2, color: B.gold, marginBottom: 4 }}>What to look for</div>
+            <p style={{ margin: 0, fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, color: B.ink, lineHeight: 1.6 }}>{looking}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Property-dominant card with subtle one-line AI hint */
+function PropertyPickCard({ property, aiSuggestion, inBlend, idx }) {
+  const [showFull, setShowFull] = useState(false);
+  const teaser = aiSuggestion?.slice(0, 100) + (aiSuggestion?.length > 100 ? "…" : "") || "";
+
+  return (
+    <div style={{
+      flexShrink: 0, borderRadius: 14, overflow: "hidden", border: `1px solid ${B.border}`,
+      background: "#fff", boxShadow: "0 2px 10px rgba(40,24,8,0.04)",
+    }}>
+      <div style={{ display: "flex", alignItems: "stretch" }}>
+        {/* Property: hero focus */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <div style={{ position: "relative", height: 110, flexShrink: 0 }}>
+            <img src={property.images?.[0]} alt={property.title} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+            <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(16,10,4,0.6) 0%, transparent 45%)" }} />
+            <div style={{
+              position: "absolute", top: 8, left: 10, width: 24, height: 24, borderRadius: "50%",
+              background: idx === 0 ? B.gold : "rgba(255,255,255,0.95)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 800, color: idx === 0 ? "#FAF6EE" : B.ink,
+            }}>
+              {idx + 1}
+            </div>
+            {inBlend && (
+              <div style={{
+                position: "absolute", top: 8, right: 10, padding: "2px 6px", borderRadius: 4,
+                background: "rgba(74,124,89,0.9)", fontFamily: "'DM Sans', sans-serif", fontSize: 7, fontWeight: 700, color: "#fff",
+              }}>
+                In blend
+              </div>
+            )}
+            <div style={{ position: "absolute", bottom: 8, left: 10, right: 10 }}>
+              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 16, fontWeight: 600, color: "#fff", textShadow: "0 1px 3px rgba(0,0,0,0.4)" }}>{property.title}</div>
+              <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, marginTop: 2 }}>{property.price}</div>
+            </div>
+          </div>
+          <div style={{ padding: "10px 12px" }}>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, marginBottom: 4 }}>{property.location}</div>
+            <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.ink, marginBottom: 6 }}>{property.beds} bd · {property.baths} ba · {property.sqft?.toLocaleString()} sqft</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+              {(property.tags || []).slice(0, 3).map(t => (
+                <span key={t} style={{ padding: "2px 6px", borderRadius: 4, background: "rgba(166,124,61,0.1)", fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 600, color: B.gold }}>{t}</span>
+              ))}
+            </div>
+            <a href={apartmentsUrl(property)} target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 700, color: B.gold, textDecoration: "none" }}>
+              View on Apartments.com
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+            </a>
+          </div>
+        </div>
+      </div>
+      {/* AI insight: one-line teaser, expand for full */}
+      {aiSuggestion && (
+        <div style={{ padding: "8px 12px 10px", borderTop: `1px solid ${B.border}`, background: "rgba(166,124,61,0.03)" }}>
+          <button onClick={() => setShowFull(!showFull)} style={{ width: "100%", textAlign: "left", border: "none", background: "none", cursor: "pointer", padding: 0 }}>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: B.gold, marginRight: 6 }}>Why we picked this</span>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.ink, fontStyle: "italic", lineHeight: 1.4 }}>
+              {showFull ? aiSuggestion : teaser}
+            </span>
+            {aiSuggestion.length > 100 && (
+              <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.gold, marginLeft: 4 }}>{showFull ? " Show less" : " Show more"}</span>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

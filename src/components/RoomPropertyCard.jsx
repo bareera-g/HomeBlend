@@ -83,9 +83,6 @@ export default function RoomPropertyCard({
         {/* Price overlay */}
         <div style={{ position: "absolute", bottom: 10, left: 11 }}>
           <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 18, fontWeight: 500, color: "#fff", lineHeight: 1 }}>{property.price}</div>
-          <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, color: "rgba(255,255,255,0.72)", marginTop: 1 }}>
-            ≈ ${Math.round(property.priceNum / 3).toLocaleString()}/person
-          </div>
         </div>
 
         {/* Photo dots */}
