@@ -47,8 +47,12 @@ export default function Dashboard() {
   const [draggedPropId, setDraggedPropId] = useState(null);
   const [dragOverRoom,  setDragOverRoom]  = useState(null);
   const [justAdded,     setJustAdded]    = useState({});
-  const [dbError,       setDbError]      = useState(null);
-  const [showDbBanner,  setShowDbBanner] = useState(false);
+  const [dbError,         setDbError]        = useState(null);
+  const [showDbBanner,    setShowDbBanner]   = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [newRoomName,     setNewRoomName]    = useState("");
+  const [createdRoom,     setCreatedRoom]    = useState(null);   // { name, room_code } after creation
+  const [codeCopied,      setCodeCopied]     = useState(false);
 
   // Refs for custom drag system
   const dragRef      = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
@@ -131,26 +135,26 @@ export default function Dashboard() {
     }
   }
 
-  async function handleCreateRoom() {
+  async function handleCreateRoom(roomName) {
+    const name = (roomName || "").trim() || `Room ${rooms.length + 1}`;
     setBusy(true);
     try {
       let room;
       try {
-        // createRoom returns { id, name, room_code (= invite_code), created_by }
-        // The creator is auto-joined by the create_blend RPC or joinRoom fallback.
-        room = await createRoom(`Room ${rooms.length + 1}`, user.id);
-        // Ensure profile is persisted with display name (joinRoom already calls upsert)
-        await joinRoom(room.id, user.id, profile?.display_name || "Me", profile?.avatar_color || "#A67C3D");
+        room = await createRoom(name, user.id);
+        // Update the owner member row with the real display name (createRoom uses "Owner" as placeholder)
+        await joinRoom(room.id, user.id, profile?.display_name || user.email?.split("@")[0] || "Me", profile?.avatar_color || "#A67C3D");
       } catch (dbErr) {
-        // DB not ready — create a local-only room for this session
         const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        console.warn("[HomeBlend] Using local room (DB not ready):", dbErr.message);
-        room = { id: `local-${fallbackCode}`, room_code: fallbackCode, created_by: user.id, local: true };
+        console.warn("[HomeBlend] DB error creating room:", dbErr.message);
+        room = { id: `local-${fallbackCode}`, name, room_code: fallbackCode, created_by: user.id, local: true };
         setShowDbBanner(true);
         setDbError(dbErr.message);
       }
-      setRooms(prev => [{ id: room.id, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
+      setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 0, propIds: [] } }));
+      setCreatedRoom({ name: room.name || name, room_code: room.room_code });
+      setNewRoomName("");
     } catch (e) {
       console.error("[HomeBlend] createRoom unexpected error:", e);
     } finally { setBusy(false); }
@@ -420,12 +424,15 @@ export default function Dashboard() {
               Database not set up.{" "}
             </span>
             <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8C5540" }}>
-              Rooms won't persist until you run the migration SQL in your{" "}
+              Run{" "}
               <a href="https://supabase.com/dashboard/project/hawvhqhqftkafbpxwyll/sql/new" target="_blank" rel="noreferrer"
                 style={{ color: "#C0624A", fontWeight: 600, textDecoration: "underline" }}>
-                Supabase SQL editor
-              </a>.{" "}
-              Copy from <code style={{ fontFamily: "monospace", fontSize: 10 }}>supabase/migrations/003_complete_schema.sql</code>.
+                both SQL migration files
+              </a>{" "}
+              in your Supabase SQL editor:{" "}
+              <code style={{ fontFamily: "monospace", fontSize: 10 }}>003_complete_schema.sql</code>{" "}then{" "}
+              <code style={{ fontFamily: "monospace", fontSize: 10 }}>004_join_requests.sql</code>.
+              {dbError && <span style={{ display: "block", marginTop: 2, fontSize: 10, opacity: 0.8 }}>Error: {dbError}</span>}
             </span>
           </div>
           <button
@@ -620,7 +627,7 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <button onClick={handleCreateRoom} disabled={busy} style={{
+                <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setShowCreateModal(true); }} disabled={busy} style={{
                   width: "100%", padding: "9px 0", borderRadius: 8,
                   background: busy ? "rgba(44,26,14,0.35)" : B.ink, border: "none", color: "#FAF6EE",
                   fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
@@ -693,7 +700,7 @@ export default function Dashboard() {
                     onOpen={() => {
                       if (room.local) {
                         setShowDbBanner(true);
-                        alert("Set up the database first to enter rooms. Copy supabase/migrations/003_complete_schema.sql into your Supabase SQL editor.");
+                        alert("Run 003_complete_schema.sql and 004_join_requests.sql in your Supabase SQL editor to enable rooms.");
                       } else {
                         nav(`/room/${room.room_code}`);
                       }
@@ -705,6 +712,186 @@ export default function Dashboard() {
           </>
         )}
       </div>
+
+      {/* ── Create Room Modal ─────────────────────────────────────────────── */}
+      {showCreateModal && (
+        <div
+          onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); } }}
+          style={{
+            position: "fixed", inset: 0, zIndex: 200,
+            background: "rgba(16,10,4,0.55)", backdropFilter: "blur(6px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            animation: "fadeInFast 0.18s ease",
+          }}
+        >
+          <div style={{
+            width: 420, borderRadius: 22,
+            background: "linear-gradient(160deg,#FFFBF5 0%,#F8F1E6 100%)",
+            boxShadow: "0 24px 80px rgba(16,10,4,0.28)",
+            overflow: "hidden",
+            animation: "slideUp 0.22s cubic-bezier(.16,1,.3,1)",
+          }}>
+
+            {/* Modal header */}
+            <div style={{ padding: "22px 24px 0", display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+              <div>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 2.5, textTransform: "uppercase", color: B.gold, marginBottom: 4 }}>
+                  Collaborative
+                </div>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 26, fontWeight: 400, color: B.ink }}>
+                  {createdRoom ? "Room Created" : "Create a Room"}
+                </div>
+              </div>
+              <button
+                onClick={() => { setShowCreateModal(false); setCreatedRoom(null); }}
+                style={{ marginTop: 4, width: 30, height: 30, borderRadius: "50%", background: "rgba(166,124,61,0.08)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <Icon d={IC.x} size={13} color={B.muted} sw={1.8} />
+              </button>
+            </div>
+
+            <div style={{ padding: "18px 24px 24px" }}>
+              {!createdRoom ? (
+                /* ── Step 1: Name the room ── */
+                <>
+                  <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
+                    Give your room a name. You can invite roommates with the code once it's created.
+                  </p>
+                  <input
+                    autoFocus
+                    value={newRoomName}
+                    onChange={e => setNewRoomName(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter" && newRoomName.trim()) handleCreateRoom(newRoomName); }}
+                    placeholder="e.g. Irvine Summer Hunt"
+                    maxLength={48}
+                    style={{
+                      width: "100%", padding: "11px 14px", borderRadius: 10,
+                      border: `1.5px solid ${B.border}`,
+                      background: "rgba(255,255,255,0.75)",
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 13, color: B.ink,
+                      outline: "none", boxSizing: "border-box",
+                      transition: "border-color 0.15s",
+                    }}
+                    onFocus={e => { e.target.style.borderColor = B.gold; }}
+                    onBlur={e => { e.target.style.borderColor = B.border; }}
+                  />
+                  <button
+                    onClick={() => handleCreateRoom(newRoomName)}
+                    disabled={busy || !newRoomName.trim()}
+                    style={{
+                      marginTop: 12, width: "100%", padding: "11px 0", borderRadius: 10,
+                      background: (busy || !newRoomName.trim()) ? "rgba(44,26,14,0.25)" : B.ink,
+                      border: "none", color: "#FAF6EE",
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 600,
+                      cursor: (busy || !newRoomName.trim()) ? "default" : "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                      transition: "background 0.15s",
+                    }}
+                  >
+                    {busy
+                      ? <><ModalSpinner />Creating…</>
+                      : <><Icon d={IC.plus} size={13} color="#FAF6EE" sw={2.2} />Create Room</>}
+                  </button>
+                </>
+              ) : (
+                /* ── Step 2: Show code + share ── */
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18, padding: "12px 14px", borderRadius: 12, background: "rgba(92,138,107,0.08)", border: "1.5px solid rgba(92,138,107,0.2)" }}>
+                    <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#5C8A6B", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FAF6EE" strokeWidth="2.2">
+                        <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: "#5C8A6B" }}>{createdRoom.name} is ready</div>
+                      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 1 }}>Share the code below to invite roommates</div>
+                    </div>
+                  </div>
+
+                  {/* Invite code display */}
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8.5, fontWeight: 700, letterSpacing: 2, textTransform: "uppercase", color: B.muted, marginBottom: 6 }}>
+                      Room Code
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{
+                        flex: 1, padding: "13px 16px", borderRadius: 10,
+                        background: "rgba(255,255,255,0.8)", border: `1.5px solid ${B.border}`,
+                        fontFamily: "'DM Sans', sans-serif", fontSize: 22, fontWeight: 800,
+                        color: B.ink, letterSpacing: 5, textAlign: "center",
+                      }}>
+                        {createdRoom.room_code}
+                      </div>
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(createdRoom.room_code);
+                          setCodeCopied(true);
+                          setTimeout(() => setCodeCopied(false), 2000);
+                        }}
+                        style={{
+                          width: 46, height: 46, borderRadius: 10, flexShrink: 0,
+                          background: codeCopied ? "rgba(92,138,107,0.12)" : B.goldBg,
+                          border: `1.5px solid ${codeCopied ? "rgba(92,138,107,0.3)" : B.gold + "44"}`,
+                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                          transition: "background 0.2s, border-color 0.2s",
+                        }}
+                        title="Copy code"
+                      >
+                        {codeCopied
+                          ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#5C8A6B" strokeWidth="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+                          : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={B.gold} strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                        }
+                      </button>
+                    </div>
+                    <p style={{ margin: "6px 0 0", fontFamily: "'DM Sans', sans-serif", fontSize: 10.5, color: B.muted, textAlign: "center" }}>
+                      {codeCopied ? "Copied to clipboard!" : "Tap the copy icon or share the code manually"}
+                    </p>
+                  </div>
+
+                  {/* Share via message */}
+                  <button
+                    onClick={() => {
+                      const msg = `Join my HomeBlend room "${createdRoom.name}"! Use code: ${createdRoom.room_code}`;
+                      if (navigator.share) {
+                        navigator.share({ title: "HomeBlend Room Invite", text: msg }).catch(() => {});
+                      } else {
+                        navigator.clipboard.writeText(msg);
+                        setCodeCopied(true);
+                        setTimeout(() => setCodeCopied(false), 2000);
+                      }
+                    }}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 10,
+                      background: "rgba(166,124,61,0.08)", border: `1.5px solid ${B.gold}33`,
+                      color: B.gold, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+                      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+                    </svg>
+                    Share Invite
+                  </button>
+
+                  <button
+                    onClick={() => { setShowCreateModal(false); setCreatedRoom(null); }}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 10,
+                      background: B.ink, border: "none", color: "#FAF6EE",
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Done
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1260,6 +1447,18 @@ function QuickFactIcon({ type }) {
   );
   if (type === "pet") return <AmenityIcon type="pet" size={11} />;
   return null;
+}
+
+/* ── Modal Spinner ──────────────────────────────────────────────────────────── */
+function ModalSpinner() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ animation: "spin 0.8s linear infinite", marginRight: 5 }}>
+      <line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/>
+      <line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/>
+      <line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/>
+      <line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/>
+    </svg>
+  );
 }
 
 /* ── Drag Dots SVG ─────────────────────────────────────────────────────────── */

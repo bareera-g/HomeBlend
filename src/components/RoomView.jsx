@@ -16,6 +16,7 @@ import {
 import MapPanel           from "./MapPanel.jsx";
 import PropertyModal      from "./PropertyModal.jsx";
 import BlendPanel         from "./BlendPanel.jsx";
+import GroupPicksPanel    from "./GroupPicksPanel.jsx";
 import RoomPropertyCard   from "./RoomPropertyCard.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
 
@@ -486,6 +487,7 @@ export default function RoomView() {
             {[
               ["map",   IC.map,   "Map"],
               ["blend", IC.spark, "Blend"],
+              ["picks", "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11", "Group Picks"],
               ...(isOwner ? [["requests", "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0", `Requests${joinRequests.filter(r=>r.status==="pending").length > 0 ? ` (${joinRequests.filter(r=>r.status==="pending").length})` : ""}`]] : []),
             ].map(([tab, icon, label]) => (
               <button
@@ -507,6 +509,12 @@ export default function RoomView() {
                 {tab === "blend" && votes.length > 0 && (
                   <span style={{
                     width: 5, height: 5, borderRadius: "50%", background: "#5C8A6B",
+                    marginLeft: 1,
+                  }} />
+                )}
+                {tab === "picks" && roomProperties.length > 0 && (
+                  <span style={{
+                    width: 5, height: 5, borderRadius: "50%", background: B.gold,
                     marginLeft: 1,
                   }} />
                 )}
@@ -555,6 +563,20 @@ export default function RoomView() {
                 votes={votes}
                 properties={roomProperties}
                 embedded={true}
+              />
+            </div>
+
+            {/* Group Picks tab */}
+            <div style={{
+              position: "absolute", inset: 0,
+              opacity: rightTab === "picks" ? 1 : 0,
+              pointerEvents: rightTab === "picks" ? "auto" : "none",
+              transition: "opacity 0.2s",
+            }}>
+              <GroupPicksPanel
+                members={members}
+                votes={votes}
+                properties={roomProperties}
               />
             </div>
 

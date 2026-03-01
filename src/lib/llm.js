@@ -107,3 +107,64 @@ Respond ONLY with valid JSON (no markdown, no explanation) in this exact structu
   if (!text) return null;
   return extractJSON(text, null);
 }
+
+/**
+ * Generate per-property group picks analysis.
+ * Returns a map keyed by property id:
+ * {
+ *   [propertyId]: {
+ *     narrative: string,
+ *     members: {
+ *       [userId]: { why: string, concern: string }
+ *     }
+ *   }
+ * }
+ */
+export async function generatePicksAnalysis({ members, votes, properties, scoredProperties }) {
+  if (!API_KEY || members.length === 0 || properties.length === 0) return null;
+
+  // Build compact member taste summaries
+  const memberSummaries = members.map(m => {
+    const uid = m.auth_user_id;
+    const liked    = properties.filter(p => votes.some(v => v.user_id === uid && v.property_id === p.id && v.vote === 1));
+    const disliked = properties.filter(p => votes.some(v => v.user_id === uid && v.property_id === p.id && v.vote === -1));
+    return {
+      id: uid,
+      name: m.display_name,
+      liked:    liked.map(p => `${p.title} (${p.price}, ${p.beds}bd${p.petFriendly ? ", pets" : ""}${p.parking ? ", parking" : ""})`).join("; "),
+      disliked: disliked.map(p => p.title).join("; "),
+    };
+  });
+
+  // Only analyse the top-N properties to keep prompt short
+  const topProps = (scoredProperties || []).slice(0, 6).map(({ property }) => ({
+    id: property.id,
+    title: property.title,
+    price: property.price,
+    beds: property.beds,
+    tags: property.tags?.slice(0, 3).join(", "),
+    extras: [property.petFriendly && "pets ok", property.parking && "parking", property.laundry === "In-unit" && "in-unit laundry"].filter(Boolean).join(", "),
+  }));
+
+  const prompt = `You are a roommate housing advisor for HomeBlend. Given member preferences and a set of rental properties, produce concise, named, first-person justifications.
+
+MEMBERS:
+${memberSummaries.map(m => `- ${m.name} (id: ${m.id}): Liked [${m.liked || "nothing yet"}]. Disliked [${m.disliked || "nothing yet"}].`).join("\n")}
+
+PROPERTIES TO ANALYSE (in order of group preference):
+${topProps.map(p => `- id:${p.id} "${p.title}" ${p.price}, ${p.beds}bd, tags:[${p.tags}], extras:[${p.extras}]`).join("\n")}
+
+Respond ONLY with valid JSON (no markdown, no explanation) in EXACTLY this structure:
+{
+  ${topProps.map(p => `"${p.id}": {
+    "narrative": "2 concise sentences explaining why this property suits (or doesn't suit) the group",
+    "members": {
+      ${memberSummaries.map(m => `"${m.id}": {"why": "one sentence why this works for ${m.name}, mentioning their name", "concern": "one sentence friction point for ${m.name} or empty string"}`).join(",\n      ")}
+    }
+  }`).join(",\n  ")}
+}`;
+
+  const text = await callClaude(prompt, 1200);
+  if (!text) return null;
+  return extractJSON(text, null);
+}
