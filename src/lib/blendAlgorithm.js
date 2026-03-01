@@ -79,6 +79,20 @@ export function compatibilityPercent(vecA, vecB) {
   return Math.round((1 - cosineDistance(vecA, vecB)) * 100);
 }
 
+/** Score a property against a taste vector (0–100). Higher = better match. */
+export function scorePropertyAgainstTaste(property, tasteVec) {
+  const propVec = extractFeatures(property);
+  let dot = 0, totalPref = 0;
+  for (const k of FEATURE_KEYS) {
+    const t = tasteVec[k] ?? 0;
+    dot += propVec[k] * t;
+    totalPref += t;
+  }
+  if (totalPref <= 0) return 50; // no preference → neutral score
+  const raw = (dot / totalPref) * 100;
+  return Math.round(Math.min(100, Math.max(0, raw)));
+}
+
 // ─── Property scoring ────────────────────────────────────────────────────────
 // Score = (likes - dislikes) across all members.
 
@@ -206,6 +220,17 @@ export function computeBlend(members, votes, properties) {
     return likes >= Math.max(1, Math.ceil(voterIds.length * 0.5));
   });
 
+  // Group aggregate taste = average of all member taste vectors
+  const groupTasteVec = {};
+  for (const k of FEATURE_KEYS) {
+    let sum = 0, n = 0;
+    for (const m of members) {
+      const v = tasteVectors[m.auth_user_id]?.[k] ?? 0;
+      if (v > 0) { sum += v; n++; }
+    }
+    groupTasteVec[k] = n > 0 ? sum / members.length : 0;
+  }
+
   return {
     groupCompatibility,
     compatMatrix,
@@ -214,5 +239,20 @@ export function computeBlend(members, votes, properties) {
     rankedProperties,
     groupFavorites,
     tasteVectors,
+    groupTasteVec,
   };
+}
+
+/**
+ * Returns top N properties from allProperties that are NOT in roomPropIds,
+ * scored by how well they match the group's taste vector.
+ */
+export function getAlternativeProperties(allProperties, roomPropIds, groupTasteVec, n = 6) {
+  const roomSet = new Set(roomPropIds);
+  const candidates = allProperties
+    .filter(p => !roomSet.has(p.id))
+    .map(p => ({ property: p, score: scorePropertyAgainstTaste(p, groupTasteVec) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, n);
+  return candidates;
 }

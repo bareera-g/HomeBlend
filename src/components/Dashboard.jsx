@@ -1605,49 +1605,25 @@ function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMo
             </p>
           </div>
 
-          {/* Quick facts */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
-            {[
-              ["home",    property.category],
-              ["sqft",    `${property.sqft?.toLocaleString()} sq ft`],
-              ["built",   `Built ${property.yearBuilt}`],
-              property.petFriendly && ["pet", "Pet friendly"],
-            ].filter(Boolean).map(([icon, text]) => (
-              <div key={text} style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 9px", borderRadius: 6, background: "rgba(166,124,61,0.06)", border: `1px solid rgba(166,124,61,0.14)` }}>
-                <QuickFactIcon type={icon} />
-                <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, fontWeight: 500 }}>{text}</span>
-              </div>
-            ))}
-          </div>
-
-          {/* External links */}
-          <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-            {[
-              ["Zillow",          `https://www.zillow.com/homes/${encodeURIComponent(property.location)}_rb/`],
-              ["Apartments.com",  `https://www.apartments.com/irvine-ca/`],
-              ["Realtor.com",     `https://www.realtor.com/apartments/${encodeURIComponent(property.location.replace(", ", "_"))}`],
-            ].map(([site, href]) => (
-              <a key={site} href={href} target="_blank" rel="noopener noreferrer"
-                onMouseDown={e => e.stopPropagation()}
-                onClick={e => e.stopPropagation()}
-                style={{
-                  flex: 1, textAlign: "center",
-                  padding: "7px 0", borderRadius: 7,
-                  border: `1px solid ${B.border}`,
-                  background: "rgba(255,255,255,0.7)",
-                  fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 600,
-                  color: B.muted, textDecoration: "none",
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                  transition: "border-color 0.15s, color 0.15s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = B.gold; e.currentTarget.style.color = B.gold; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = B.border; e.currentTarget.style.color = B.muted; }}
-              >
-                {site}
-                <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
-              </a>
-            ))}
-          </div>
+          {/* Zillow link */}
+          <a href={`https://www.zillow.com/homes/${encodeURIComponent(property.location)}_rb/`} target="_blank" rel="noopener noreferrer"
+            onMouseDown={e => e.stopPropagation()}
+            onClick={e => e.stopPropagation()}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "8px 14px", borderRadius: 8, marginBottom: 14,
+              border: `1px solid ${B.border}`,
+              background: "rgba(255,255,255,0.7)",
+              fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+              color: B.gold, textDecoration: "none",
+              transition: "border-color 0.15s, background 0.15s",
+            }}
+            onMouseEnter={e => { e.currentTarget.style.borderColor = B.gold; e.currentTarget.style.background = "rgba(166,124,61,0.06)"; }}
+            onMouseLeave={e => { e.currentTarget.style.borderColor = B.border; e.currentTarget.style.background = "rgba(255,255,255,0.7)"; }}
+          >
+            View on Zillow
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3"/></svg>
+          </a>
         </div>
       </div>
 
@@ -1686,35 +1662,6 @@ function AmenityIcon({ type, size = 12 }) {
       </svg>
     </span>
   );
-  return null;
-}
-
-/* ── Quick Fact Icon (SVG, no emoji) ───────────────────────────────────────── */
-function QuickFactIcon({ type }) {
-  const w = 11, h = 11;
-  if (type === "home") return (
-    <span style={{ display: "inline-flex", flexShrink: 0 }}>
-      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-        <polyline points="9 22 9 12 15 12 15 22"/>
-      </svg>
-    </span>
-  );
-  if (type === "sqft") return (
-    <span style={{ display: "inline-flex", flexShrink: 0 }}>
-      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-      </svg>
-    </span>
-  );
-  if (type === "built") return (
-    <span style={{ display: "inline-flex", flexShrink: 0 }}>
-      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-      </svg>
-    </span>
-  );
-  if (type === "pet") return <AmenityIcon type="pet" size={11} />;
   return null;
 }
 

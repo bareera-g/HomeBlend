@@ -16,9 +16,9 @@ import {
 import MapPanel           from "./MapPanel.jsx";
 import PropertyModal      from "./PropertyModal.jsx";
 import BlendPanel         from "./BlendPanel.jsx";
-import GroupPicksPanel    from "./GroupPicksPanel.jsx";
 import RoomPropertyCard   from "./RoomPropertyCard.jsx";
 import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
+import VoteOverlay from "./VoteOverlay.jsx";
 import LoadingScreen from "./LoadingScreen.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════ */
@@ -38,6 +38,7 @@ export default function RoomView() {
   const [selected,      setSelected]     = useState(null);
   const [rightTab,      setRightTab]     = useState("map");
   const [showAddDrawer, setShowAddDrawer] = useState(false);
+  const [showVoteOverlay, setShowVoteOverlay] = useState(false);
   const [copied,        setCopied]       = useState(false);
   const [loading,       setLoading]      = useState(true);
   const [error,         setError]        = useState(null);
@@ -379,14 +380,30 @@ export default function RoomView() {
                   {roomProperties.length} {roomProperties.length === 1 ? "property" : "properties"} · {totalVotes} vote{totalVotes !== 1 ? "s" : ""}
                 </div>
               </div>
-              <button onClick={() => setShowAddDrawer(true)} style={{
-                display: "flex", alignItems: "center", gap: 5, padding: "7px 13px", borderRadius: 8,
-                border: `1px solid ${B.border}`, background: B.goldBg, color: B.gold,
-                fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
-              }}>
-                <Icon d={IC.plus} size={12} color={B.gold} sw={2.2} />
-                Add
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <button
+                  onClick={() => setShowVoteOverlay(true)}
+                  disabled={roomProperties.filter(p => myVotes[p.id] == null).length === 0}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5, padding: "7px 12px", borderRadius: 8,
+                    border: `1px solid ${B.border}`, background: B.likeBg, color: B.like,
+                    fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600,
+                    cursor: roomProperties.filter(p => myVotes[p.id] == null).length === 0 ? "default" : "pointer",
+                    opacity: roomProperties.filter(p => myVotes[p.id] == null).length === 0 ? 0.6 : 1,
+                  }}
+                >
+                  <Icon d={IC.heart} size={12} color={B.like} sw={2} />
+                  Vote
+                </button>
+                <button onClick={() => setShowAddDrawer(true)} style={{
+                  display: "flex", alignItems: "center", gap: 5, padding: "7px 13px", borderRadius: 8,
+                  border: `1px solid ${B.border}`, background: B.goldBg, color: B.gold,
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
+                }}>
+                  <Icon d={IC.plus} size={12} color={B.gold} sw={2.2} />
+                  Add
+                </button>
+              </div>
             </div>
             {/* Voting progress bar */}
             {roomProperties.length > 0 && members.length > 0 && (
@@ -481,7 +498,6 @@ export default function RoomView() {
             {[
               ["map",   IC.map,   "Map"],
               ["blend", IC.spark, "Blend"],
-              ["picks", "M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11", "Group Picks"],
               ...(isOwner ? [["requests", "M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0", `Requests${joinRequests.filter(r=>r.status==="pending").length > 0 ? ` (${joinRequests.filter(r=>r.status==="pending").length})` : ""}`]] : []),
             ].map(([tab, icon, label]) => (
               <button
@@ -547,22 +563,9 @@ export default function RoomView() {
                 members={members}
                 votes={votes}
                 properties={roomProperties}
-                embedded={true}
-              />
-            </div>
-
-            {/* Group Picks tab */}
-            <div style={{
-              position: "absolute", inset: 0,
-              opacity: rightTab === "picks" ? 1 : 0,
-              pointerEvents: rightTab === "picks" ? "auto" : "none",
-              transition: "opacity 0.2s",
-            }}>
-              <GroupPicksPanel
-                members={members}
-                votes={votes}
-                properties={roomProperties}
                 allProperties={PROPERTIES}
+                embedded={true}
+                isVisible={rightTab === "blend"}
               />
             </div>
 
@@ -690,6 +693,13 @@ export default function RoomView() {
           onClose={() => setShowAddDrawer(false)}
         />
       )}
+      <VoteOverlay
+        open={showVoteOverlay}
+        properties={roomProperties}
+        myVotes={myVotes}
+        onVote={handleVote}
+        onClose={() => setShowVoteOverlay(false)}
+      />
     </div>
   );
 }

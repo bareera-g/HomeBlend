@@ -38,9 +38,11 @@ function extractJSON(text, fallback) {
  *   memberInsights: { [userId]: { bullets: string[], summary: string } },
  *   compatibility:  { narrative: string, works: string[], tensions: string[] },
  *   topPick:        string   (title of the group's best match)
+ *   pairwiseCompat: { "id1|id2": { score: number, reason: string } } — AI-assessed pairwise compatibility with justification
+ *   alternativePicks: Array<{ propertyId: number, reasoning: string }> — 6 properties NOT in room with AI reasoning
  * }
  */
-export async function generateBlendAnalysis({ members, votes, properties, rankedProperties }) {
+export async function generateBlendAnalysis({ members, votes, properties, rankedProperties, allProperties = [], roomPropIds = [] }) {
   if (members.length === 0) return null;
 
   const memberSummaries = members.map(m => {
@@ -67,36 +69,69 @@ export async function generateBlendAnalysis({ members, votes, properties, ranked
     `#${i+1} ${r.property.title} (score ${r.score > 0 ? "+" : ""}${r.score}, ${r.likes} likes, ${r.dislikes} dislikes)`
   ).join("; ");
 
+  const roomSet = new Set(roomPropIds);
+  const nonRoomProps = (allProperties || []).filter(p => !roomSet.has(p.id));
+  const propListForAlternatives = nonRoomProps.slice(0, 50).map(p =>
+    `[ID ${p.id}] ${p.title} | ${p.location} | ${p.price} | ${p.beds}bd | ${[p.petFriendly && "pets", p.parking && "parking", p.laundry === "In-unit" && "laundry"].filter(Boolean).join(", ")} | ${(p.tags || []).slice(0, 3).join(", ")}`
+  ).join("\n");
+
+  const pairKeys = [];
+  for (let i = 0; i < members.length; i++) {
+    for (let j = i + 1; j < members.length; j++) {
+      const a = members[i].auth_user_id;
+      const b = members[j].auth_user_id;
+      pairKeys.push(`${a}|${b}`);
+    }
+  }
+
   const prompt = `You are a warm, insightful housing advisor who truly cares about helping roommate groups find a home where everyone feels seen and heard.
 
 This isn't just an apartment search — it's about finding a place where ${members.map(m => m.display_name).join(", ")} can thrive together. Each person has brought something of themselves to this search. Your job is to reflect that back with empathy and precision.
 
 MEMBERS AND THEIR VOICES (${members.length} people):
-${memberSummaries.map(m => `- ${m.name}: They loved [${m.liked || "nothing yet"}]. They passed on [${m.disliked || "nothing"}]. They've invested time adding ${m.addedCount} properties — that tells you something about how seriously they're taking this.`).join("\n")}
+${memberSummaries.map(m => `- ${m.name} (id: ${m.id}): They loved [${m.liked || "nothing yet"}]. They passed on [${m.disliked || "nothing"}]. They've invested time adding ${m.addedCount} properties.`).join("\n")}
 
 TOP VOTED PROPERTIES: ${topProps || "No votes yet"}
 
 TONE REQUIREMENTS:
-- memberInsights: Write as if you're speaking directly to each person. Use "you" and reference their specific choices. Acknowledge what they're clearly drawn to (space? value? vibe? amenities?) with genuine insight. Bullets should feel like personalized observations, not generic labels.
-- compatibility narrative: Paint a picture of this group's dynamic. Name specific strengths — e.g., "When it comes to [X], you're all aligned, and that's rare." Acknowledge real tensions with care, not judgment. What would make living together feel effortless vs. require compromise?
-- works/tensions: Be specific. Reference actual preferences from the data — e.g., "shared appreciation for in-unit laundry" or "different priorities on pet policies."
+- memberInsights: AI-generate personalized insights based EXCLUSIVELY on their actual picks (properties they liked and passed on). Each bullet MUST reference a specific property they liked or passed on by name. Examples: "You gravitated toward Woodbury Townhome for its pet policy and resort pool." "Passing on Northpark Square suggests budget and in-unit laundry matter most." "Portola Heights caught your eye — rooftop deck and new construction align with your taste." Never give generic advice; every insight must tie to a property from their list. Bullets: max 15 words each. Summary: one sentence synthesizing what their picks reveal about their priorities.
+- compatibility narrative: Paint a picture of this group's dynamic. Name specific strengths and tensions. Sound human.
+- works/tensions: Be specific. Reference actual preferences from the data.
+- pairwiseCompat: For EACH pair of members, assess compatibility 0-100 based on how aligned their LIKES and DISLIKES are. Provide a 1-sentence reason explaining why you gave that score. Consider: Do they like similar properties? Pass on similar ones? Key: "userId1|userId2" (order doesn't matter).
+- alternativePicks: Select exactly 6 properties from the list below that are NOT already in the room. For EACH pick, "reasoning" is CRITICAL: write a MINIMUM of 2 full sentences, ideally 3. Never write just one sentence. The reasoning must feel deeply personalized — mention EVERY member by name (${members.map(m => m.display_name).join(", ")}). For each person, write a full sentence explaining WHY this property speaks to what they liked or what they passed on. Connect specific amenities/features to their actual votes. Example format: "${members[0]?.display_name || "Sarah"} loved [property X] for its pet policy, and this one allows dogs — same draw. ${members[1]?.display_name || "Alex"} passed on places without in-unit laundry, and this has it. ${members[2]?.display_name || "Jordan"} gravitated toward new builds; the 2022 construction here matches that." Make it feel like you studied each person's picks. Use exact property IDs from the list.
+
+PROPERTIES NOT IN ROOM (choose 6):
+${propListForAlternatives || "(none available)"}
 
 Respond ONLY with valid JSON (no markdown, no explanation):
 {
   "memberInsights": {
-    ${memberSummaries.map(m => `"${m.id}": {"bullets": ["personalized insight about ${m.name} (max 12 words each)", "another tailored observation"], "summary": "one warm, specific sentence about what ${m.name} is looking for — their style, priorities, what home means to them"}`).join(",\n    ")}
+    ${memberSummaries.map(m => `"${m.id}": {"bullets": ["insight referencing a specific property ${m.name} liked or passed on", "another insight tied to another pick"], "summary": "one sentence synthesizing what their picks reveal"}`).join(",\n    ")}
   },
   "compatibility": {
-    "narrative": "2-3 empathetic sentences. Name the group. Describe what unites them and what might need gentle navigation. Sound human, not robotic.",
-    "works": ["specific shared value drawn from their actual likes", "another concrete alignment"],
-    "tensions": ["one real area of difference or trade-off, stated with care"]
+    "narrative": "2-3 empathetic sentences",
+    "works": ["shared value 1", "shared value 2"],
+    "tensions": ["area of difference"]
   },
-  "topPick": "exact property title most likely to satisfy everyone based on the data, or empty string if unclear"
+  "topPick": "exact property title or empty string",
+  "pairwiseCompat": {
+    ${pairKeys.map(k => `"${k}": {"score": 0-100, "reason": "one sentence justifying this compatibility score"}`).join(",\n    ")}
+  },
+  "alternativePicks": [
+    {"propertyId": 1, "reasoning": "MINIMUM 2-3 full sentences. First sentence: why this fits [member1]'s likes (name a property they liked and the feature). Second sentence: why it works for [member2] (their preference). Third sentence if room: [member3]'s fit. Never one sentence only."},
+    ...exactly 6 items, all with propertyIds from the list above, NONE from the room
+  ]
 }`;
 
-  const text = await callOpenAI(prompt, 800);
+  const text = await callOpenAI(prompt, 3500);
   if (!text) return null;
-  return extractJSON(text, null);
+  const parsed = extractJSON(text, null);
+  if (!parsed) return null;
+  return {
+    ...parsed,
+    pairwiseCompat: parsed.pairwiseCompat || {},
+    alternativePicks: Array.isArray(parsed.alternativePicks) ? parsed.alternativePicks.slice(0, 6) : [],
+  };
 }
 
 /**
