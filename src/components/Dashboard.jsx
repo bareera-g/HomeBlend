@@ -14,6 +14,7 @@ import { PROPERTIES } from "../data/properties.js";
 import { computeUniquePropertyImages } from "../lib/uniquePropertyImages.js";
 import MapPanel from "./MapPanel.jsx";
 import LoadingScreen from "./LoadingScreen.jsx";
+import AddPropertiesDrawer from "./AddPropertiesDrawer.jsx";
 
 function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCase(); }
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
@@ -63,7 +64,8 @@ export default function Dashboard() {
   const [showDbBanner,    setShowDbBanner]   = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [newRoomName,     setNewRoomName]    = useState("");
-  const [createdRoom,     setCreatedRoom]    = useState(null);   // { name, room_code } after creation
+  const [createdRoom,     setCreatedRoom]    = useState(null);   // { id, name, room_code } after creation
+  const [showAddDrawerForRoomId, setShowAddDrawerForRoomId] = useState(null); // room id when opening Add Properties drawer
   const [codeCopied,      setCodeCopied]     = useState(false);
   const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
   const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
@@ -225,7 +227,7 @@ export default function Dashboard() {
       }
       setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 0, propIds: [] } }));
-      setCreatedRoom({ name: room.name || name, room_code: room.room_code });
+      setCreatedRoom({ id: room.id, name: room.name || name, room_code: room.room_code });
       setNewRoomName("");
     } catch (e) {
       console.error("[HomeBlend] createRoom unexpected error:", e);
@@ -254,7 +256,7 @@ export default function Dashboard() {
       }
       setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 1, propIds: [Number(propertyId)] } }));
-      setCreatedRoom({ name: room.name || name, room_code: room.room_code });
+      setCreatedRoom({ id: room.id, name: room.name || name, room_code: room.room_code });
       setNewRoomName("");
       setPendingCreatePropertyId(null);
     } catch (e) {
@@ -444,6 +446,26 @@ export default function Dashboard() {
     window.addEventListener("mouseup", handleMouseUp);
   }, [handleMouseMove, handleMouseUp]);
 
+  const handleAddPropertyFromDrawer = useCallback(async (roomId, propertyId) => {
+    if (!roomId || !user) return;
+    const propId = Number(propertyId);
+    setRoomMeta(prev => {
+      const cur = prev[roomId] || { memberCount: 0, propertyCount: 0, propIds: [] };
+      if (cur.propIds.includes(propId)) return prev;
+      return { ...prev, [roomId]: { ...cur, propertyCount: cur.propertyCount + 1, propIds: [...cur.propIds, propId] } };
+    });
+    try {
+      await addPropertyToRoom(roomId, propId, user.id);
+    } catch (err) {
+      console.error("[HomeBlend] Add property to room failed:", err);
+      setRoomMeta(prev => {
+        const cur = prev[roomId];
+        if (!cur) return prev;
+        return { ...prev, [roomId]: { ...cur, propertyCount: cur.propertyCount - 1, propIds: cur.propIds.filter(id => id !== propId) } };
+      });
+    }
+  }, [user]);
+
   // When a property is selected from the map: switch to Discover, scroll to it, highlight ~2s
   const handleMapPropertySelect = useCallback((p) => {
     if (!p) return;
@@ -563,8 +585,25 @@ export default function Dashboard() {
         {/* ── Properties panel ──────────────────────────────────────────────── */}
         <div style={{ width: 340, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
-          {/* Sub-header: count + filter toggle */}
+          {/* Sub-header: count + location search + filter toggle */}
           <div style={{ padding: "9px 11px 8px", borderBottom: `1px solid ${B.border}`, flexShrink: 0, background: "rgba(251,247,241,0.9)" }}>
+            {/* Location search bar — fixed to Irvine, CA (read-only) */}
+            <div style={{ marginBottom: 8, position: "relative" }}>
+              <div style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", zIndex: 1, pointerEvents: "none" }}>
+                <Icon d={IC.pin} size={14} color={B.muted} sw={1.8} />
+              </div>
+              <input
+                type="text"
+                value="Irvine, CA"
+                readOnly
+                style={{
+                  width: "100%", padding: "8px 12px 8px 34px", borderRadius: 9,
+                  border: `1px solid ${B.border}`, background: "rgba(255,255,255,0.8)",
+                  fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.ink,
+                  outline: "none", boxSizing: "border-box", cursor: "default",
+                }}
+              />
+            </div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted }}>
                 <strong style={{ color: B.ink }}>{filtered.length}</strong> {filtered.length === 1 ? "property" : "properties"}
@@ -1079,6 +1118,29 @@ export default function Dashboard() {
                   </button>
 
                   <button
+                    onClick={() => {
+                      const roomId = createdRoom?.id;
+                      setShowCreateModal(false);
+                      setCreatedRoom(null);
+                      setPendingCreatePropertyId(null);
+                      if (roomId) setShowAddDrawerForRoomId(roomId);
+                      setShowRooms(true);
+                    }}
+                    style={{
+                      width: "100%", padding: "10px 0", borderRadius: 10,
+                      background: "rgba(166,124,61,0.12)", border: `1.5px solid ${B.gold}55`,
+                      color: B.ink, fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 600,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 7,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                    Add a property
+                  </button>
+
+                  <button
                     onClick={() => { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); }}
                     style={{
                       width: "100%", padding: "10px 0", borderRadius: 10,
@@ -1094,6 +1156,15 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {showAddDrawerForRoomId && (
+        <AddPropertiesDrawer
+          roomPropertyIds={roomMeta[showAddDrawerForRoomId]?.propIds || []}
+          savedIds={savedIds}
+          onAdd={(propertyId) => handleAddPropertyFromDrawer(showAddDrawerForRoomId, propertyId)}
+          onClose={() => setShowAddDrawerForRoomId(null)}
+        />
       )}
     </div>
   );

@@ -44,18 +44,21 @@ function PropertyMarker({ property, myVote, blendScore, isSelected, isDraggingHi
             <span style={{ color: B.muted, fontFamily: "'DM Sans', sans-serif", fontSize: 11 }}>$</span>
           )}
         </div>
-        {/* Price underneath */}
+        {/* Price tag — rounded pill style */}
         <div style={{
           background: color, color: "#fff", fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700,
-          padding: "4px 8px", whiteSpace: "nowrap",
+          padding: "5px 10px", whiteSpace: "nowrap",
+          borderRadius: 10,
+          borderBottomLeftRadius: 4, borderBottomRightRadius: 4,
+          boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
         }}>
           {property.price || "—"}
         </div>
-        {/* Pin pointer */}
+        {/* Pin pointer — softer, smaller */}
         <div style={{
           width: 0, height: 0,
-          borderLeft: "10px solid transparent", borderRight: "10px solid transparent",
-          borderTop: `10px solid ${color}`,
+          borderLeft: "8px solid transparent", borderRight: "8px solid transparent",
+          borderTop: `8px solid ${color}`,
           marginTop: -1,
         }} />
       </div>
