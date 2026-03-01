@@ -12,6 +12,7 @@ import {
   fetchVotes, recordVote,
   fetchSavedPropertyIds,
   callBlend,
+  subscribeToRoom, unsubscribeFromRoom,
 } from "../lib/supabase.js";
 import MapPanel           from "./MapPanel.jsx";
 import PropertyModal      from "./PropertyModal.jsx";
@@ -76,19 +77,17 @@ export default function RoomView() {
 
   // ── Realtime subscriptions ───────────────────────────────────────────────
   useEffect(() => {
-    if (!room?.id || !supabase) return;
-    const channel = supabase.channel(`room:${room.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "votes", filter: `room_id=eq.${room.id}` },
-        async () => setVotes(await fetchVotes(room.id)))
-      .on("postgres_changes", { event: "*", schema: "public", table: "room_properties", filter: `room_id=eq.${room.id}` },
-        async () => {
-          const rp = await fetchRoomProperties(room.id);
-          setRoomPropMeta(rp); setRoomPropIds(rp.map(r => r.property_id));
-        })
-      .on("postgres_changes", { event: "*", schema: "public", table: "room_members", filter: `room_id=eq.${room.id}` },
-        async () => setMembers(await fetchMembers(room.id)))
-      .subscribe();
-    return () => supabase.removeChannel(channel);
+    if (!room?.id) return;
+    const channel = subscribeToRoom(room.id, {
+      onVotes:      async () => setVotes(await fetchVotes(room.id)),
+      onProperties: async () => {
+        const rp = await fetchRoomProperties(room.id);
+        setRoomPropMeta(rp);
+        setRoomPropIds(rp.map(r => r.property_id));
+      },
+      onMembers: async () => setMembers(await fetchMembers(room.id)),
+    });
+    return () => unsubscribeFromRoom(channel);
   }, [room?.id]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────

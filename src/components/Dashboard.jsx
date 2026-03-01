@@ -180,28 +180,36 @@ export default function Dashboard() {
       setDraggedPropId(dr.propId);
       setShowRooms(true); // Auto-open rooms panel
 
-      // Create drag ghost
+      // Create drag ghost — tall vertical card with large photo
       const ghost = document.createElement("div");
       ghost.style.cssText = `
         position: fixed; z-index: 9999; pointer-events: none;
-        width: 220px; padding: 10px 12px; border-radius: 12px;
-        background: rgba(251,247,241,0.96); backdrop-filter: blur(16px);
-        border: 1.5px solid rgba(166,124,61,0.5);
-        box-shadow: 0 12px 40px rgba(40,24,8,0.28);
-        font-family: 'DM Sans', sans-serif; font-size: 11px;
-        color: #2C1A0E; font-weight: 600;
-        display: flex; align-items: center; gap: 8px;
-        transform: rotate(2deg) scale(1.04);
+        width: 168px; border-radius: 16px; overflow: hidden;
+        background: #fff;
+        border: 1.5px solid rgba(166,124,61,0.55);
+        box-shadow: 0 20px 56px rgba(40,24,8,0.35), 0 4px 16px rgba(40,24,8,0.15);
+        transform: rotate(3deg) scale(1.05);
         animation: pop 0.15s ease;
-        opacity: 0.95;
+        opacity: 0.97;
       `;
       const prop = PROPERTIES.find(p => p.id === dr.propId);
       if (prop) {
+        const perPerson = prop.priceNum ? `≈ $${Math.round(prop.priceNum / 3).toLocaleString()}/person` : "";
         ghost.innerHTML = `
-          <div style="width:44px;height:36px;border-radius:7px;background:url(${prop.images[0]}) center/cover;flex-shrink:0;border:1px solid rgba(166,124,61,0.2)"></div>
-          <div>
-            <div style="font-family:'Cormorant Garamond',serif;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px">${prop.title}</div>
-            <div style="font-size:10px;color:#A67C3D;font-weight:600;margin-top:1px">${prop.price}</div>
+          <div style="position:relative;height:120px;background:url(${prop.images[0]}) center/cover;flex-shrink:0;">
+            <div style="position:absolute;inset:0;background:linear-gradient(to top,rgba(12,5,2,0.65) 0%,transparent 55%);"></div>
+            <div style="position:absolute;top:8px;right:8px;padding:2px 7px;border-radius:4px;background:rgba(12,5,2,0.6);font-family:'DM Sans',sans-serif;font-size:7px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:rgba(255,255,255,0.92)">${prop.category}</div>
+            <div style="position:absolute;bottom:8px;left:10px;">
+              <div style="font-family:'Cormorant Garamond',serif;font-size:18px;font-weight:500;color:#fff;line-height:1">${prop.price}</div>
+              ${perPerson ? `<div style="font-family:'DM Sans',sans-serif;font-size:8px;color:rgba(255,255,255,0.72);margin-top:1px">${perPerson}</div>` : ""}
+            </div>
+          </div>
+          <div style="padding:9px 10px 8px;">
+            <div style="font-family:'Cormorant Garamond',serif;font-size:13.5px;font-weight:500;color:#2C1A0E;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;">${prop.title}</div>
+            <div style="font-family:'DM Sans',sans-serif;font-size:9px;color:#8C7056;margin-top:3px;">${prop.beds}bd · ${prop.baths}ba · ${prop.sqft?.toLocaleString()}sf</div>
+          </div>
+          <div style="margin:0 10px 9px;padding:5px 8px;border-radius:7px;background:rgba(166,124,61,0.08);border:1px dashed rgba(166,124,61,0.4);text-align:center;">
+            <span style="font-family:'DM Sans',sans-serif;font-size:8.5px;font-weight:700;color:#A67C3D;letter-spacing:1.1px;text-transform:uppercase;">Drop into a room</span>
           </div>
         `;
       }
@@ -210,8 +218,8 @@ export default function Dashboard() {
     }
 
     if (dr.active && ghostRef.current) {
-      ghostRef.current.style.left = `${e.clientX - 110}px`;
-      ghostRef.current.style.top  = `${e.clientY - 30}px`;
+      ghostRef.current.style.left = `${e.clientX - 84}px`;
+      ghostRef.current.style.top  = `${e.clientY - 80}px`;
     }
 
     // Hit-test room cards
