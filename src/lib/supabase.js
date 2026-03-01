@@ -18,6 +18,35 @@ function guard(name) {
   if (!supabase) throw new Error(`Supabase is not configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your .env file.`);
 }
 
+/** Returns true if the error is a "table doesn't exist / schema not ready" error. */
+function isSchemaMissing(err) {
+  if (!err) return false;
+  const msg = err?.message || err?.details || "";
+  return (
+    msg.includes("schema cache") ||
+    msg.includes("does not exist") ||
+    msg.includes("relation") ||
+    err?.code === "PGRST200" ||
+    err?.code === "42P01"
+  );
+}
+
+/**
+ * Wraps a Supabase query fn. If the table doesn't exist yet (migration not run),
+ * returns `fallback` silently instead of crashing the UI.
+ */
+async function safeQuery(fn, fallback, label = "query") {
+  try {
+    return await fn();
+  } catch (err) {
+    if (isSchemaMissing(err)) {
+      console.warn(`[HomeBlend] DB table missing for "${label}" — run supabase/migrations/003_complete_schema.sql`);
+      return fallback;
+    }
+    throw err;
+  }
+}
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 export async function signUp(email, password, displayName) {
   guard("signUp");
@@ -52,18 +81,22 @@ export async function signOut() {
 // ── Profiles ──────────────────────────────────────────────────────────────────
 export async function fetchProfile(userId) {
   guard("fetchProfile");
-  const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
-  return data;
+  return safeQuery(async () => {
+    const { data } = await supabase.from("profiles").select("*").eq("id", userId).single();
+    return data;
+  }, null, "fetchProfile");
 }
 
 export async function ensureProfile(userId, displayName) {
   guard("ensureProfile");
-  const existing = await fetchProfile(userId);
-  if (existing) return existing;
-  const { data } = await supabase.from("profiles")
-    .insert({ id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() })
-    .select().single();
-  return data;
+  return safeQuery(async () => {
+    const { data: existing } = await supabase.from("profiles").select("*").eq("id", userId).single();
+    if (existing) return existing;
+    const { data } = await supabase.from("profiles")
+      .insert({ id: userId, display_name: displayName || "User", avatar_color: randomAvatarColor() })
+      .select().single();
+    return data;
+  }, { id: userId, display_name: displayName || userId.slice(0, 8), avatar_color: randomAvatarColor() }, "ensureProfile");
 }
 
 export async function updateProfile(userId, updates) {
@@ -79,21 +112,29 @@ export async function updateProfile(userId, updates) {
 // ── Saved Properties ──────────────────────────────────────────────────────────
 export async function fetchSavedPropertyIds(userId) {
   guard("fetchSavedPropertyIds");
-  const { data } = await supabase.from("saved_properties")
-    .select("property_id").eq("user_id", userId);
-  return (data || []).map(r => r.property_id);
+  return safeQuery(async () => {
+    const { data } = await supabase.from("saved_properties")
+      .select("property_id").eq("user_id", userId);
+    return (data || []).map(r => r.property_id);
+  }, [], "fetchSavedPropertyIds");
 }
 
 export async function saveProperty(userId, propertyId) {
   guard("saveProperty");
-  await supabase.from("saved_properties")
-    .upsert({ user_id: userId, property_id: propertyId }, { onConflict: "user_id,property_id" });
+  return safeQuery(() =>
+    supabase.from("saved_properties")
+      .upsert({ user_id: userId, property_id: propertyId }, { onConflict: "user_id,property_id" }),
+    null, "saveProperty"
+  );
 }
 
 export async function unsaveProperty(userId, propertyId) {
   guard("unsaveProperty");
-  await supabase.from("saved_properties")
-    .delete().eq("user_id", userId).eq("property_id", propertyId);
+  return safeQuery(() =>
+    supabase.from("saved_properties")
+      .delete().eq("user_id", userId).eq("property_id", propertyId),
+    null, "unsaveProperty"
+  );
 }
 
 // ── Rooms ─────────────────────────────────────────────────────────────────────
@@ -102,108 +143,139 @@ export async function createRoom(roomCode, userId) {
   const { data, error } = await supabase.from("rooms")
     .insert({ room_code: roomCode.toUpperCase(), created_by: userId || null })
     .select().single();
-  if (error) throw error;
+  if (error) {
+    if (isSchemaMissing(error)) {
+      console.warn("[HomeBlend] rooms table not found — run migration 003_complete_schema.sql");
+      throw new Error("Database not set up yet. Please run the migration SQL in your Supabase dashboard. See supabase/migrations/003_complete_schema.sql");
+    }
+    throw error;
+  }
   return data;
 }
 
 export async function fetchRoom(roomCode) {
   guard("fetchRoom");
-  const { data } = await supabase.from("rooms")
-    .select("*").eq("room_code", roomCode.toUpperCase()).single();
-  return data;
+  return safeQuery(async () => {
+    const { data } = await supabase.from("rooms")
+      .select("*").eq("room_code", roomCode.toUpperCase()).maybeSingle();
+    return data;
+  }, null, "fetchRoom");
 }
 
 /** Returns rooms the user is a member of, most recent first. */
 export async function fetchUserRooms(userId) {
   guard("fetchUserRooms");
-  const { data, error } = await supabase.from("room_members")
-    .select("joined_at, rooms(*)")
-    .eq("auth_user_id", userId)
-    .order("joined_at", { ascending: false });
-  if (error) throw error;
-  return (data || []).map(r => r.rooms).filter(Boolean);
+  return safeQuery(async () => {
+    const { data, error } = await supabase.from("room_members")
+      .select("joined_at, rooms(*)")
+      .eq("auth_user_id", userId)
+      .order("joined_at", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(r => r.rooms).filter(Boolean);
+  }, [], "fetchUserRooms");
 }
 
 /** Join or re-join a room (upsert so it's safe to call multiple times). */
 export async function joinRoom(roomId, userId, displayName, avatarColor) {
   guard("joinRoom");
-  const { error } = await supabase.from("room_members").upsert(
-    {
-      room_id:      roomId,
-      auth_user_id: userId,
-      display_name: displayName || "Member",
-      avatar_color: avatarColor || randomAvatarColor(),
-      role:         "member",
-    },
-    { onConflict: "room_id,auth_user_id" }
-  );
-  if (error) throw error;
+  return safeQuery(async () => {
+    const { error } = await supabase.from("room_members").upsert(
+      {
+        room_id:      roomId,
+        auth_user_id: userId,
+        display_name: displayName || "Member",
+        avatar_color: avatarColor || randomAvatarColor(),
+        role:         "member",
+      },
+      { onConflict: "room_id,auth_user_id" }
+    );
+    if (error) throw error;
+  }, undefined, "joinRoom");
 }
 
 /** Leave a room permanently. */
 export async function leaveRoom(roomId, userId) {
   guard("leaveRoom");
-  await supabase.from("room_members")
-    .delete().eq("room_id", roomId).eq("auth_user_id", userId);
+  return safeQuery(() =>
+    supabase.from("room_members")
+      .delete().eq("room_id", roomId).eq("auth_user_id", userId),
+    null, "leaveRoom"
+  );
 }
 
 export async function fetchMembers(roomId) {
   guard("fetchMembers");
-  const { data } = await supabase.from("room_members")
-    .select("*").eq("room_id", roomId).order("joined_at");
-  return data || [];
+  return safeQuery(async () => {
+    const { data } = await supabase.from("room_members")
+      .select("*").eq("room_id", roomId).order("joined_at");
+    return data || [];
+  }, [], "fetchMembers");
 }
 
 /** Update a member's display name inside a room. */
 export async function updateMemberName(roomId, userId, displayName) {
   guard("updateMemberName");
-  await supabase.from("room_members")
-    .update({ display_name: displayName })
-    .eq("room_id", roomId).eq("auth_user_id", userId);
+  return safeQuery(() =>
+    supabase.from("room_members")
+      .update({ display_name: displayName })
+      .eq("room_id", roomId).eq("auth_user_id", userId),
+    null, "updateMemberName"
+  );
 }
 
 // ── Room Properties ───────────────────────────────────────────────────────────
 export async function addPropertyToRoom(roomId, propertyId, userId) {
   guard("addPropertyToRoom");
-  const { error } = await supabase.from("room_properties").upsert(
-    { room_id: roomId, property_id: propertyId, added_by: userId },
-    { onConflict: "room_id,property_id" }
-  );
-  if (error) throw error;
+  return safeQuery(async () => {
+    const { error } = await supabase.from("room_properties").upsert(
+      { room_id: roomId, property_id: propertyId, added_by: userId },
+      { onConflict: "room_id,property_id" }
+    );
+    if (error) throw error;
+  }, undefined, "addPropertyToRoom");
 }
 
 export async function removePropertyFromRoom(roomId, propertyId) {
   guard("removePropertyFromRoom");
-  await supabase.from("room_properties")
-    .delete().eq("room_id", roomId).eq("property_id", propertyId);
+  return safeQuery(() =>
+    supabase.from("room_properties")
+      .delete().eq("room_id", roomId).eq("property_id", propertyId),
+    null, "removePropertyFromRoom"
+  );
 }
 
 export async function fetchRoomProperties(roomId) {
   guard("fetchRoomProperties");
-  const { data } = await supabase.from("room_properties")
-    .select("*").eq("room_id", roomId).order("added_at");
-  return data || [];
+  return safeQuery(async () => {
+    const { data } = await supabase.from("room_properties")
+      .select("*").eq("room_id", roomId).order("added_at");
+    return data || [];
+  }, [], "fetchRoomProperties");
 }
 
 // ── Votes ─────────────────────────────────────────────────────────────────────
 export async function recordVote(roomId, userId, propertyId, vote) {
   guard("recordVote");
-  if (vote === null) {
-    await supabase.from("votes").delete()
-      .eq("room_id", roomId).eq("user_id", userId).eq("property_id", propertyId);
-    return;
-  }
-  const { error } = await supabase.from("votes").upsert(
-    { room_id: roomId, user_id: userId, property_id: propertyId, vote },
-    { onConflict: "room_id,user_id,property_id" }
-  );
-  if (error) throw error;
+  return safeQuery(async () => {
+    if (vote === null) {
+      await supabase.from("votes").delete()
+        .eq("room_id", roomId).eq("user_id", userId).eq("property_id", propertyId);
+      return;
+    }
+    const { error } = await supabase.from("votes").upsert(
+      { room_id: roomId, user_id: userId, property_id: propertyId, vote },
+      { onConflict: "room_id,user_id,property_id" }
+    );
+    if (error) throw error;
+  }, undefined, "recordVote");
 }
 
 export async function fetchVotes(roomId) {
   guard("fetchVotes");
-  const { data } = await supabase.from("votes").select("*").eq("room_id", roomId);
-  return data || [];
+  return safeQuery(async () => {
+    const { data } = await supabase.from("votes").select("*").eq("room_id", roomId);
+    return data || [];
+  }, [], "fetchVotes");
 }
 
 // ── Realtime subscription builders ────────────────────────────────────────────

@@ -64,10 +64,13 @@ export default function RoomView() {
 
         let roomData = await fetchRoom(code);
         if (!roomData) {
-          // First visitor creates the room
           roomData = await createRoom(code, user.id);
         }
         setRoom(roomData);
+        if (!roomData) {
+          setError("Room not found. Check the room code and try again.");
+          return;
+        }
 
         // Check if user is already a member
         const m = await fetchMembers(roomData.id);

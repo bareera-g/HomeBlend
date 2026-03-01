@@ -47,6 +47,8 @@ export default function Dashboard() {
   const [draggedPropId, setDraggedPropId] = useState(null);
   const [dragOverRoom,  setDragOverRoom]  = useState(null);
   const [justAdded,     setJustAdded]    = useState({});
+  const [dbError,       setDbError]      = useState(null);
+  const [showDbBanner,  setShowDbBanner] = useState(false);
 
   // Refs for custom drag system
   const dragRef      = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
@@ -60,16 +62,27 @@ export default function Dashboard() {
       setLoading(true);
       try {
         const p = await ensureProfile(user.id, user.email?.split("@")[0]);
-        setProfile(p);
-        const [r, s] = await Promise.all([fetchUserRooms(user.id), fetchSavedPropertyIds(user.id)]);
+        setProfile(p || { display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
+        const [r, s] = await Promise.all([
+          fetchUserRooms(user.id),
+          fetchSavedPropertyIds(user.id),
+        ]);
         setRooms(r);
         setSavedIds(s);
-        const meta = {};
-        await Promise.all(r.map(async room => {
-          const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
-          meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
-        }));
-        setRoomMeta(meta);
+        if (r.length > 0) {
+          const meta = {};
+          await Promise.all(r.map(async room => {
+            const [m, rp] = await Promise.all([fetchMembers(room.id), fetchRoomProperties(room.id)]);
+            meta[room.id] = { memberCount: m.length, propertyCount: rp.length, propIds: rp.map(x => x.property_id) };
+          }));
+          setRoomMeta(meta);
+        }
+      } catch (e) {
+        console.error("[HomeBlend] Init error:", e);
+        setDbError(e.message);
+        setShowDbBanner(true);
+        // Still set a fallback profile so the UI works
+        setProfile({ display_name: user.email?.split("@")[0] || "You", avatar_color: "#A67C3D" });
       } finally { setLoading(false); }
     }
     init();
@@ -122,13 +135,22 @@ export default function Dashboard() {
     setBusy(true);
     try {
       const code = genCode();
-      const room  = await createRoom(code, user.id);
-      await joinRoom(room.id, user.id, profile?.display_name || "Me", profile?.avatar_color || "#A67C3D");
-      const newRoom = { id: room.id, room_code: code };
-      setRooms(prev => [newRoom, ...prev]);
+      let room;
+      try {
+        room = await createRoom(code, user.id);
+        await joinRoom(room.id, user.id, profile?.display_name || "Me", profile?.avatar_color || "#A67C3D");
+      } catch (dbErr) {
+        // DB not ready — create a local-only room for this session
+        console.warn("[HomeBlend] Using local room (DB not ready):", dbErr.message);
+        room = { id: `local-${code}`, room_code: code, created_by: user.id, local: true };
+        setShowDbBanner(true);
+        setDbError(dbErr.message);
+      }
+      setRooms(prev => [{ id: room.id, room_code: code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 0, propIds: [] } }));
-    } catch (e) { alert("Could not create room: " + e.message); }
-    finally { setBusy(false); }
+    } catch (e) {
+      console.error("[HomeBlend] createRoom unexpected error:", e);
+    } finally { setBusy(false); }
   }
 
   async function handleJoin(e) {
@@ -378,6 +400,41 @@ export default function Dashboard() {
         </div>
       </header>
 
+
+      {/* ── DB Setup Banner ──────────────────────────────────────────────────── */}
+      {showDbBanner && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12,
+          padding: "10px 20px",
+          background: "rgba(192,98,74,0.08)", borderBottom: "1px solid rgba(192,98,74,0.2)",
+          flexShrink: 0,
+        }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0624A" strokeWidth="2" strokeLinecap="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><circle cx="12" cy="16" r="1" fill="#C0624A"/>
+          </svg>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11.5, fontWeight: 600, color: "#C0624A" }}>
+              Database not set up.{" "}
+            </span>
+            <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: "#8C5540" }}>
+              Rooms won't persist until you run the migration SQL in your{" "}
+              <a href="https://supabase.com/dashboard/project/hawvhqhqftkafbpxwyll/sql/new" target="_blank" rel="noreferrer"
+                style={{ color: "#C0624A", fontWeight: 600, textDecoration: "underline" }}>
+                Supabase SQL editor
+              </a>.{" "}
+              Copy from <code style={{ fontFamily: "monospace", fontSize: 10 }}>supabase/migrations/003_complete_schema.sql</code>.
+            </span>
+          </div>
+          <button
+            onClick={() => setShowDbBanner(false)}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "#C0624A", padding: 4, opacity: 0.6 }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+      )}
 
       {/* ── Body ─────────────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", position: "relative" }}>
@@ -630,7 +687,14 @@ export default function Dashboard() {
                     alreadyIn={draggedPropId ? (roomMeta[room.id]?.propIds || []).includes(draggedPropId) : false}
                     draggingActive={dragging}
                     setRef={el => { roomCardRefs.current[room.id] = el; }}
-                    onOpen={() => nav(`/room/${room.room_code}`)}
+                    onOpen={() => {
+                      if (room.local) {
+                        setShowDbBanner(true);
+                        alert("Set up the database first to enter rooms. Copy supabase/migrations/003_complete_schema.sql into your Supabase SQL editor.");
+                      } else {
+                        nav(`/room/${room.room_code}`);
+                      }
+                    }}
                   />
                 ))}
               </div>
@@ -1135,49 +1199,61 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
 
 /* ── Amenity Icon (SVG, no emoji) ──────────────────────────────────────────── */
 function AmenityIcon({ type, size = 12 }) {
-  const s = { width: size, height: size, flexShrink: 0 };
+  const w = size, h = size;
   if (type === "pet") return (
-    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="4.5" cy="9.5" r="2"/><circle cx="9" cy="5" r="2"/>
-      <circle cx="15" cy="5" r="2"/><circle cx="19.5" cy="9.5" r="2"/>
-      <path d="M12 17.5c-3.5 0-7-2-7-5s3-4 7-4 7 1 7 4-3.5 5-7 5z"/>
-    </svg>
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="4.5" cy="9.5" r="2"/><circle cx="9" cy="5" r="2"/>
+        <circle cx="15" cy="5" r="2"/><circle cx="19.5" cy="9.5" r="2"/>
+        <path d="M12 17.5c-3.5 0-7-2-7-5s3-4 7-4 7 1 7 4-3.5 5-7 5z"/>
+      </svg>
+    </span>
   );
   if (type === "parking") return (
-    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="18" height="18" rx="3"/>
-      <path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>
-    </svg>
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="3"/>
+        <path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>
+      </svg>
+    </span>
   );
   if (type === "laundry") return (
-    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="3" width="20" height="18" rx="2"/>
-      <circle cx="12" cy="13" r="4"/>
-      <line x1="6" y1="7" x2="6.01" y2="7"/>
-      <line x1="9" y1="7" x2="9.01" y2="7"/>
-    </svg>
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="18" rx="2"/>
+        <circle cx="12" cy="13" r="4"/>
+        <line x1="6" y1="7" x2="6.01" y2="7"/>
+        <line x1="9" y1="7" x2="9.01" y2="7"/>
+      </svg>
+    </span>
   );
   return null;
 }
 
 /* ── Quick Fact Icon (SVG, no emoji) ───────────────────────────────────────── */
 function QuickFactIcon({ type }) {
-  const s = { width: 11, height: 11, flexShrink: 0 };
+  const w = 11, h = 11;
   if (type === "home") return (
-    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-      <polyline points="9 22 9 12 15 12 15 22"/>
-    </svg>
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+        <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+    </span>
   );
   if (type === "sqft") return (
-    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
-    </svg>
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>
+      </svg>
+    </span>
   );
   if (type === "built") return (
-    <svg {...s} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
-    </svg>
+    <span style={{ display: "inline-flex", flexShrink: 0 }}>
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none" stroke={B.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+    </span>
   );
   if (type === "pet") return <AmenityIcon type="pet" size={11} />;
   return null;
