@@ -66,6 +66,7 @@ export default function Dashboard() {
   const [createdRoom,     setCreatedRoom]    = useState(null);   // { name, room_code } after creation
   const [codeCopied,      setCodeCopied]     = useState(false);
   const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
+  const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
 
   // Refs for custom drag system
   const dragRef         = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
@@ -194,25 +195,25 @@ export default function Dashboard() {
     } finally { setBusy(false); }
   }
 
-  async function handleCreateRoomWithProperty(propertyId) {
-    const prop = PROPERTIES.find(p => p.id === propertyId);
-    const suggestedName = prop ? `${prop.title?.slice(0, 24) || "New"} Room` : `Room ${rooms.length + 1}`;
+  async function handleCreateRoomWithProperty(roomName, propertyId) {
+    const name = (roomName || "").trim() || `Room ${rooms.length + 1}`;
     setBusy(true);
     try {
       let room;
       try {
-        room = await createRoom(suggestedName, user.id, profile?.display_name || user.display_name || "Me", profile?.avatar_color || user.avatar_color || "#A67C3D");
+        room = await createRoom(name, user.id, profile?.display_name || user.display_name || "Me", profile?.avatar_color || user.avatar_color || "#A67C3D");
       } catch (dbErr) {
         const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         console.warn("[HomeBlend] DB error creating room:", dbErr.message);
-        room = { id: `local-${fallbackCode}`, name: suggestedName, room_code: fallbackCode, created_by: user.id, local: true };
+        room = { id: `local-${fallbackCode}`, name, room_code: fallbackCode, created_by: user.id, local: true };
         setShowDbBanner(true);
         setDbError(dbErr.message);
       }
-      setRooms(prev => [{ id: room.id, name: room.name || suggestedName, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
+      setRooms(prev => [{ id: room.id, name: room.name || name, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 1, propIds: [propertyId] } }));
-      setCreatedRoom({ name: room.name || suggestedName, room_code: room.room_code });
+      setCreatedRoom({ name: room.name || name, room_code: room.room_code });
       setNewRoomName("");
+      setPendingCreatePropertyId(null);
       setShowCreateModal(true);
       try {
         await addPropertyToRoom(room.id, propertyId, user.id);
@@ -373,8 +374,12 @@ export default function Dashboard() {
     cleanupDrag();
 
     if (droppedRoom === CREATE_NEW_ROOM_ID) {
-      // Create new room with this property
-      handleCreateRoomWithProperty(propId);
+      // Open create modal so user can name the room (room will include this property)
+      const prop = PROPERTIES.find(p => p.id === propId);
+      const suggestedName = prop ? `${prop.title?.slice(0, 24) || "New"} Room` : "";
+      setPendingCreatePropertyId(propId);
+      setNewRoomName(suggestedName);
+      setShowCreateModal(true);
       return;
     }
 
@@ -400,7 +405,7 @@ export default function Dashboard() {
         });
       }
     }
-  }, [rooms, user, cleanupDrag, handleCreateRoomWithProperty]);
+  }, [rooms, user, cleanupDrag]);
 
   const onCardMouseDown = useCallback((e, propId) => {
     if (e.button !== 0) return; // left button only
@@ -441,22 +446,6 @@ export default function Dashboard() {
               cursor: "pointer", transition: "all 0.18s",
             }}>{l}</button>
           ))}
-        </div>
-
-        {/* Price slider — larger thumb, non-linear increments (small → large) */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
-            Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
-          </span>
-          <input
-            type="range"
-            className="price-slider"
-            min={0}
-            max={PRICE_STEPS.length - 1}
-            step={1}
-            value={priceToIndex(maxPrice)}
-            onChange={e => setMaxPrice(PRICE_STEPS[+e.target.value])}
-          />
         </div>
 
         <div style={{ flex: 1 }} />
@@ -581,6 +570,24 @@ export default function Dashboard() {
           {/* Compact filter dropdown (inside properties panel) */}
           {showFilters && (
             <div style={{ padding: "12px 11px 10px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0, animation: "fadeIn 0.18s ease" }}>
+              {/* Price */}
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 6 }}>Max price</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>
+                    Up to <strong style={{ color: B.gold, fontWeight: 700 }}>${maxPrice.toLocaleString()}</strong>
+                  </span>
+                  <input
+                    type="range"
+                    className="price-slider"
+                    min={0}
+                    max={PRICE_STEPS.length - 1}
+                    step={1}
+                    value={priceToIndex(maxPrice)}
+                    onChange={e => setMaxPrice(PRICE_STEPS[+e.target.value])}
+                  />
+                </div>
+              </div>
               {/* Beds */}
               <div style={{ marginBottom: 9 }}>
                 <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 8, fontWeight: 700, letterSpacing: 1.5, textTransform: "uppercase", color: B.muted, marginBottom: 5 }}>Bedrooms</div>
@@ -729,7 +736,7 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setShowCreateModal(true); }} disabled={busy} style={{
+                <button onClick={() => { setCreatedRoom(null); setNewRoomName(""); setPendingCreatePropertyId(null); setShowCreateModal(true); }} disabled={busy} style={{
                   width: "100%", padding: "9px 0", borderRadius: 8,
                   background: busy ? "rgba(44,26,14,0.35)" : B.ink, border: "none", color: "#FAF6EE",
                   fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500,
@@ -871,7 +878,7 @@ export default function Dashboard() {
       {/* ── Create Room Modal ─────────────────────────────────────────────── */}
       {showCreateModal && (
         <div
-          onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); } }}
+          onClick={e => { if (e.target === e.currentTarget) { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); } }}
           style={{
             position: "fixed", inset: 0, zIndex: 200,
             background: "rgba(16,10,4,0.55)", backdropFilter: "blur(6px)",
@@ -898,7 +905,7 @@ export default function Dashboard() {
                 </div>
               </div>
               <button
-                onClick={() => { setShowCreateModal(false); setCreatedRoom(null); }}
+                onClick={() => { setShowCreateModal(false); setCreatedRoom(null); setPendingCreatePropertyId(null); }}
                 style={{ marginTop: 4, width: 30, height: 30, borderRadius: "50%", background: "rgba(166,124,61,0.08)", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
               >
                 <Icon d={IC.x} size={13} color={B.muted} sw={1.8} />
@@ -909,14 +916,25 @@ export default function Dashboard() {
               {!createdRoom ? (
                 /* ── Step 1: Name the room ── */
                 <>
-                  <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
-                    Give your room a name. You can invite roommates with the code once it's created.
-                  </p>
+                  {pendingCreatePropertyId ? (
+                    <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
+                      Name your room. It will include the property you dropped.
+                    </p>
+                  ) : (
+                    <p style={{ margin: "0 0 14px", fontFamily: "'DM Sans', sans-serif", fontSize: 12, color: B.muted, lineHeight: 1.6 }}>
+                      Give your room a name. You can invite roommates with the code once it's created.
+                    </p>
+                  )}
                   <input
                     autoFocus
                     value={newRoomName}
                     onChange={e => setNewRoomName(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter" && newRoomName.trim()) handleCreateRoom(newRoomName); }}
+                    onKeyDown={e => {
+                      if (e.key === "Enter" && newRoomName.trim()) {
+                        if (pendingCreatePropertyId) handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId);
+                        else handleCreateRoom(newRoomName);
+                      }
+                    }}
                     placeholder="e.g. Irvine Summer Hunt"
                     maxLength={48}
                     style={{
@@ -931,7 +949,7 @@ export default function Dashboard() {
                     onBlur={e => { e.target.style.borderColor = B.border; }}
                   />
                   <button
-                    onClick={() => handleCreateRoom(newRoomName)}
+                    onClick={() => pendingCreatePropertyId ? handleCreateRoomWithProperty(newRoomName, pendingCreatePropertyId) : handleCreateRoom(newRoomName)}
                     disabled={busy || !newRoomName.trim()}
                     style={{
                       marginTop: 12, width: "100%", padding: "11px 0", borderRadius: 10,

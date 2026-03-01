@@ -37,7 +37,7 @@ button { -webkit-tap-highlight-color: transparent; }
 input[type="range"].price-slider {
   -webkit-appearance: none;
   appearance: none;
-  width: 110px;
+  width: 260px;
   height: 8px;
   background: rgba(166,124,61,0.18);
   border-radius: 4px;
