@@ -79,6 +79,24 @@ export default function Dashboard() {
   const ghostRef        = useRef(null);
   const roomsListRef    = useRef(null);   // scrollable rooms list
   const scrollIntervalRef = useRef(null); // hover-to-scroll interval
+  const [roomScrollState, setRoomScrollState] = useState({ canScrollUp: false, canScrollDown: false });
+
+  // Detect when room list overflows and update scroll position state (for conditional up/down arrows)
+  useEffect(() => {
+    const el = roomsListRef.current;
+    if (!el) return;
+    const check = () => {
+      const overflow = el.scrollHeight > el.clientHeight;
+      const canScrollUp = overflow && el.scrollTop > 4;
+      const canScrollDown = overflow && el.scrollTop + el.clientHeight < el.scrollHeight - 4;
+      setRoomScrollState(s => (s.canScrollUp !== canScrollUp || s.canScrollDown !== canScrollDown) ? { canScrollUp, canScrollDown } : s);
+    };
+    check();
+    el.addEventListener("scroll", check);
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", check); ro.disconnect(); };
+  }, [dragging, rooms]);
 
   // Hover-to-scroll when dragging a property (find your room in a long list)
   const startRoomListScroll = useCallback((dir) => {
@@ -790,44 +808,17 @@ export default function Dashboard() {
 
               {/* Drag hint banner */}
               {dragging && (
-                <div style={{
-                  margin: "10px 14px 0", padding: "10px 14px",
-                  borderRadius: 9, background: "rgba(166,124,61,0.1)", border: `1.5px dashed ${B.gold}`,
-                  textAlign: "center", animation: "pulse 1.5s ease infinite",
+                <p style={{
+                  margin: "10px 14px 0", fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted,
+                  textAlign: "center", lineHeight: 1.5,
                 }}>
-                  <p style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 700, color: B.gold, lineHeight: 1.5 }}>
-                    Drop onto a room to add this property
-                  </p>
-                </div>
-              )}
-
-              {/* Create new room drop zone — when dragging, drop here to make a new room with this property */}
-              {dragging && (
-                <div
-                  ref={createNewRoomRef}
-                  style={{
-                    marginTop: 10, marginBottom: 4, padding: "14px 16px",
-                    borderRadius: 12,
-                    border: dragOverRoom === CREATE_NEW_ROOM_ID
-                      ? `2px solid ${B.gold}`
-                      : "1.5px dashed rgba(166,124,61,0.4)",
-                    background: dragOverRoom === CREATE_NEW_ROOM_ID ? "rgba(166,124,61,0.12)" : "rgba(166,124,61,0.06)",
-                    textAlign: "center", cursor: "copy",
-                    transition: "all 0.2s ease",
-                  }}
-                >
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: dragOverRoom === CREATE_NEW_ROOM_ID ? B.gold : "rgba(166,124,61,0.7)", marginBottom: 4 }}>
-                    Create new room with this property
-                  </div>
-                  <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.muted }}>
-                    Drop here → name your room → we&apos;ll add the property
-                  </div>
-                </div>
+                  Drop onto a room to add this property
+                </p>
               )}
 
               {/* Room cards — list with hover-to-scroll when dragging */}
               <div style={{ flex: 1, minHeight: 0, position: "relative", display: "flex", flexDirection: "column", overflow: "hidden" }}>
-                {dragging && rooms.length > 0 && (
+                {dragging && rooms.length > 0 && roomScrollState.canScrollUp && (
                   <div
                     onMouseEnter={() => startRoomListScroll(-1)}
                     onMouseLeave={stopRoomListScroll}
@@ -846,6 +837,29 @@ export default function Dashboard() {
                   ref={roomsListRef}
                   style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 14px 24px", display: "flex", flexDirection: "column", gap: 9 }}
                 >
+                {/* Create new room drop zone — same width as room cards (first item in same container) */}
+                {dragging && (
+                  <div
+                    ref={createNewRoomRef}
+                    style={{
+                      flexShrink: 0, padding: "14px 15px", borderRadius: 13,
+                      border: dragOverRoom === CREATE_NEW_ROOM_ID
+                        ? `2px solid ${B.gold}`
+                        : "1.5px dashed rgba(166,124,61,0.4)",
+                      background: dragOverRoom === CREATE_NEW_ROOM_ID ? "rgba(166,124,61,0.12)" : "rgba(166,124,61,0.06)",
+                      textAlign: "center", cursor: "copy",
+                      transition: "all 0.2s ease",
+                      boxShadow: "0 4px 16px rgba(80,50,10,0.1)",
+                    }}
+                  >
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, fontWeight: 700, letterSpacing: 1.2, textTransform: "uppercase", color: dragOverRoom === CREATE_NEW_ROOM_ID ? B.gold : "rgba(166,124,61,0.7)", marginBottom: 4 }}>
+                      Create new room with this property
+                    </div>
+                    <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.muted }}>
+                      Drop here → name your room → we&apos;ll add the property
+                    </div>
+                  </div>
+                )}
                 {rooms.length === 0 ? (
                   <div style={{ padding: "36px 16px", textAlign: "center" }}>
                     <div style={{ width: 44, height: 44, borderRadius: "50%", background: "rgba(166,124,61,0.08)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
@@ -876,7 +890,7 @@ export default function Dashboard() {
                   />
                 ))}
                 </div>
-                {dragging && rooms.length > 0 && (
+                {dragging && rooms.length > 0 && roomScrollState.canScrollDown && (
                   <div
                     onMouseEnter={() => startRoomListScroll(1)}
                     onMouseLeave={stopRoomListScroll}
