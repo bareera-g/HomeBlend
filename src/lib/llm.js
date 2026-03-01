@@ -1,28 +1,26 @@
 /**
- * HomeBlend — LLM utilities (Anthropic Claude)
- * Key is loaded from VITE_ANTHROPIC_API_KEY in .env.local
+ * HomeBlend — LLM utilities (Google Gemini)
+ * Key is loaded from VITE_GEMINI_API_KEY in .env.local
  */
 
-const API_KEY = import.meta.env.VITE_ANTHROPIC_API_KEY || "";
-const MODEL   = "claude-3-haiku-20240307";
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const MODEL   = "gemini-1.5-flash";
 
 export const isLLMReady = Boolean(API_KEY);
 
-async function callClaude(prompt, maxTokens = 512) {
+async function callGemini(prompt, maxTokens = 512) {
   if (!API_KEY) return null;
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(API_KEY)}`;
+    const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "x-api-key": API_KEY,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-        "anthropic-dangerous-allow-browser": "true",
-      },
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        model: MODEL,
-        max_tokens: maxTokens,
-        messages: [{ role: "user", content: prompt }],
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: maxTokens,
+          temperature: 0.4,
+        },
       }),
     });
     if (!res.ok) {
@@ -31,7 +29,8 @@ async function callClaude(prompt, maxTokens = 512) {
       return null;
     }
     const data = await res.json();
-    return data.content?.[0]?.text || null;
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? null;
+    return text;
   } catch (e) {
     console.error("[HomeBlend LLM] Fetch error:", e);
     return null;
@@ -103,7 +102,7 @@ Respond ONLY with valid JSON (no markdown, no explanation) in this exact structu
   "topPick": "name of the property most likely to satisfy everyone, or empty string"
 }`;
 
-  const text = await callClaude(prompt, 800);
+  const text = await callGemini(prompt, 800);
   if (!text) return null;
   return extractJSON(text, null);
 }
@@ -164,7 +163,7 @@ Respond ONLY with valid JSON (no markdown, no explanation) in EXACTLY this struc
   }`).join(",\n  ")}
 }`;
 
-  const text = await callClaude(prompt, 1200);
+  const text = await callGemini(prompt, 1200);
   if (!text) return null;
   return extractJSON(text, null);
 }
