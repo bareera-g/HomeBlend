@@ -134,19 +134,22 @@ export default function Dashboard() {
   async function handleCreateRoom() {
     setBusy(true);
     try {
-      const code = genCode();
       let room;
       try {
-        room = await createRoom(code, user.id);
+        // createRoom returns { id, name, room_code (= invite_code), created_by }
+        // The creator is auto-joined by the create_blend RPC or joinRoom fallback.
+        room = await createRoom(`Room ${rooms.length + 1}`, user.id);
+        // Ensure profile is persisted with display name (joinRoom already calls upsert)
         await joinRoom(room.id, user.id, profile?.display_name || "Me", profile?.avatar_color || "#A67C3D");
       } catch (dbErr) {
         // DB not ready — create a local-only room for this session
+        const fallbackCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         console.warn("[HomeBlend] Using local room (DB not ready):", dbErr.message);
-        room = { id: `local-${code}`, room_code: code, created_by: user.id, local: true };
+        room = { id: `local-${fallbackCode}`, room_code: fallbackCode, created_by: user.id, local: true };
         setShowDbBanner(true);
         setDbError(dbErr.message);
       }
-      setRooms(prev => [{ id: room.id, room_code: code, created_by: user.id, local: room.local }, ...prev]);
+      setRooms(prev => [{ id: room.id, room_code: room.room_code, created_by: user.id, local: room.local }, ...prev]);
       setRoomMeta(prev => ({ ...prev, [room.id]: { memberCount: 1, propertyCount: 0, propIds: [] } }));
     } catch (e) {
       console.error("[HomeBlend] createRoom unexpected error:", e);

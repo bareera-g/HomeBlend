@@ -4,7 +4,7 @@ import { PROPERTIES } from "../data/properties.js";
 import { B, Icon, IC, LogoMark } from "../Brand.jsx";
 import { useAuth } from "../lib/auth.jsx";
 import {
-  fetchRoom, createRoom,
+  fetchRoom,
   ensureProfile,
   fetchMembers, joinRoom,
   fetchRoomProperties, addPropertyToRoom, removePropertyFromRoom,
@@ -62,15 +62,13 @@ export default function RoomView() {
         const p = await ensureProfile(user.id, user.email?.split("@")[0]);
         setProfile(p);
 
-        let roomData = await fetchRoom(code);
-        if (!roomData) {
-          roomData = await createRoom(code, user.id);
-        }
-        setRoom(roomData);
+        const roomData = await fetchRoom(code);
         if (!roomData) {
           setError("Room not found. Check the room code and try again.");
+          setLoading(false);
           return;
         }
+        setRoom(roomData);
 
         // Check if user is already a member
         const m = await fetchMembers(roomData.id);
