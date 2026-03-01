@@ -562,6 +562,7 @@ export default function RoomView() {
                 members={members}
                 votes={votes}
                 properties={roomProperties}
+                allProperties={PROPERTIES}
               />
             </div>
 

@@ -17,6 +17,16 @@ function genCode() { return Math.random().toString(36).substring(2, 8).toUpperCa
 const CATEGORIES = ["All", "Apartment", "Condo", "Townhome", "Single Family"];
 const IMG_H = 230;
 
+/** Price steps: $100 at low end → $250 mid → $500 at high end; extends to $7k for luxury listings */
+const PRICE_STEPS = [
+  1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000,
+  2250, 2500, 2750, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000,
+];
+function priceToIndex(p) {
+  const idx = PRICE_STEPS.findIndex(s => s >= p);
+  return idx >= 0 ? idx : PRICE_STEPS.length - 1;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 export default function Dashboard() {
   const { user, signOut }  = useAuth();
@@ -30,7 +40,7 @@ export default function Dashboard() {
   const [selected,      setSelected]     = useState(null);
   const [filter,        setFilter]       = useState("all");
   const [category,      setCategory]     = useState("All");
-  const [maxPrice,      setMaxPrice]     = useState(5000);
+  const [maxPrice,      setMaxPrice]     = useState(7000);
   const [minBeds,       setMinBeds]      = useState(0);
   const [minBaths,      setMinBaths]     = useState(0);
   const [petOnly,       setPetOnly]      = useState(false);
@@ -53,6 +63,9 @@ export default function Dashboard() {
   const [newRoomName,     setNewRoomName]    = useState("");
   const [createdRoom,     setCreatedRoom]    = useState(null);   // { name, room_code } after creation
   const [codeCopied,      setCodeCopied]     = useState(false);
+  const [roomTransition,  setRoomTransition] = useState(null);   // { cx, cy, name, code }
+  const [pendingCreatePropertyId, setPendingCreatePropertyId] = useState(null); // when set, modal is for creating room with this property
+  const [highlightedPropertyId, setHighlightedPropertyId] = useState(null);     // map-click → scroll to card & pulse highlight
 
   // Refs for custom drag system
   const dragRef      = useRef({ active: false, propId: null, startX: 0, startY: 0, ghost: null });
@@ -113,7 +126,7 @@ export default function Dashboard() {
   }, [filter, category, maxPrice, minBeds, minBaths, petOnly, parkingReq, laundryReq, sortBy, savedIds]);
 
   const activeFilters = [
-    maxPrice < 5000, minBeds > 0, minBaths > 0,
+    maxPrice < PRICE_STEPS[PRICE_STEPS.length - 1], minBeds > 0, minBaths > 0,
     petOnly, parkingReq, laundryReq, sortBy !== "default",
   ].filter(Boolean).length;
 
@@ -314,6 +327,26 @@ export default function Dashboard() {
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
   }, [handleMouseMove, handleMouseUp]);
+
+  // When a property is selected from the map: switch to Discover, scroll to it, highlight ~2s
+  const handleMapPropertySelect = useCallback((p) => {
+    if (!p) return;
+    setSelected(prev => (prev?.id === p.id ? null : p));
+    if (selected?.id === p.id) return; // deselecting, nothing more to do
+    setFilter("all");
+    setCategory("All");
+    setHighlightedPropertyId(p.id);
+    setTimeout(() => {
+      const el = document.getElementById(`property-card-${p.id}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 80);
+  }, []);
+
+  useEffect(() => {
+    if (!highlightedPropertyId) return;
+    const t = setTimeout(() => setHighlightedPropertyId(null), 2200);
+    return () => clearTimeout(t);
+  }, [highlightedPropertyId]);
 
   // ── Loading ───────────────────────────────────────────────────────────────
   if (loading) return (
@@ -541,14 +574,16 @@ export default function Dashboard() {
                 )}
               </div>
             ) : filtered.map(p => (
-              <PropertyCard
-                key={p.id}
-                property={p}
-                saved={savedIds.includes(p.id)}
-                isDragging={draggedPropId === p.id}
-                onSave={e => toggleSave(p.id, e)}
-                onMouseDown={onCardMouseDown}
-              />
+              <div key={p.id} id={`property-card-${p.id}`} style={{ scrollMargin: 12 }}>
+                <PropertyCard
+                  property={p}
+                  saved={savedIds.includes(p.id)}
+                  isDragging={draggedPropId === p.id}
+                  isHighlighted={highlightedPropertyId === p.id}
+                  onSave={e => toggleSave(p.id, e)}
+                  onMouseDown={onCardMouseDown}
+                />
+              </div>
             ))}
           </div>
         </div>
@@ -560,7 +595,7 @@ export default function Dashboard() {
             swipes={mapSwipes}
             blendData={null}
             selectedProperty={selected}
-            onSelect={p => setSelected(prev => prev?.id === p.id ? null : p)}
+            onSelect={handleMapPropertySelect}
           />
 
           {/* Rooms toggle FAB (when panel is closed) */}
@@ -913,6 +948,8 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
           : "rgba(255,255,255,0.72)",
         backdropFilter: "blur(10px)",
         padding: "14px 15px",
+        paddingBottom: draggingActive ? 22 : 14,
+        minHeight: draggingActive ? 125 : undefined,
         cursor: draggingActive ? "copy" : "pointer",
         transition: "all 0.2s cubic-bezier(.16,1,.3,1)",
         position: "relative",
@@ -998,7 +1035,7 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
 
       {/* Drop here indicator when dragging */}
       {draggingActive && !isOver && !isAdded && (
-        <div style={{ marginTop: 10, padding: "6px 0", borderRadius: 7, border: `1.5px dashed rgba(166,124,61,0.3)`, textAlign: "center" }}>
+        <div style={{ marginTop: 10, marginBottom: 12, padding: "6px 0", borderRadius: 7, border: `1.5px dashed rgba(166,124,61,0.3)`, textAlign: "center" }}>
           <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, fontWeight: 600, letterSpacing: 1, textTransform: "uppercase", color: "rgba(166,124,61,0.55)" }}>
             Drop here
           </span>
@@ -1009,7 +1046,7 @@ function RoomDropCard({ room, meta = {}, isOver, isAdded, alreadyIn, draggingAct
 }
 
 /* ── Property Card ─────────────────────────────────────────────────────────── */
-function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
+function PropertyCard({ property, saved, isDragging, isHighlighted, onSave, onMouseDown }) {
   const [hovered,   setHovered]   = useState(false);
   const [imgIdx,    setImgIdx]    = useState(0);
   const [expanded,  setExpanded]  = useState(false);
@@ -1046,10 +1083,12 @@ function PropertyCard({ property, saved, isDragging, onSave, onMouseDown }) {
       style={{
         borderRadius: 16, overflow: "hidden", flexShrink: 0,
         display: "flex", flexDirection: "column",
-        border: `1.5px solid ${hovered ? "rgba(166,124,61,0.4)" : "rgba(255,255,255,0.88)"}`,
+        border: `1.5px solid ${isHighlighted ? B.gold : hovered ? "rgba(166,124,61,0.4)" : "rgba(255,255,255,0.88)"}`,
         background: "#fff",
         boxShadow: isDragging
           ? "none"
+          : isHighlighted
+          ? "0 0 0 2px rgba(166,124,61,0.35), 0 8px 28px rgba(166,124,61,0.2)"
           : hovered
           ? "0 10px 32px rgba(80,50,10,0.13)"
           : "0 2px 12px rgba(80,50,10,0.07)",

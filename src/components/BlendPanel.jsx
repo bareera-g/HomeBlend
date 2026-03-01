@@ -127,7 +127,6 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
           </div>
         )}
 
-
         {/* ── LLM Compatibility narrative ──────────────────────────────────── */}
         {llmData?.compatibility && (
           <section>

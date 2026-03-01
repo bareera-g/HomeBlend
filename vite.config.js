@@ -8,7 +8,7 @@ function openaiProxyPlugin() {
     name: "homeblend-openai-proxy",
     config(_, { mode }) {
       const env = loadEnv(mode, process.cwd(), "");
-      apiKey = env.OPENAI_API_KEY || "";
+      apiKey = env.OPENAI_API_KEY || env.VITE_OPENAI_API_KEY || "";
     },
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
@@ -38,7 +38,7 @@ function openaiProxyPlugin() {
             method: "POST",
             headers: {
               "content-type": "application/json",
-              "authorization": `Bearer ${apiKey}`,
+              "Authorization": `Bearer ${apiKey}`,
             },
             body: JSON.stringify({
               model: "gpt-4o-mini",
