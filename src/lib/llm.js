@@ -1,13 +1,13 @@
 /**
  * HomeBlend — LLM utilities (OpenAI via server proxy)
- * The API key is stored server-side as OPENAI_API_KEY in .env
+ * The API key is stored server-side as OPENAI_API_KEY in .env.local
  * and never shipped to the browser.
  */
 
 export const isLLMReady = true;
 
 async function callLLM(prompt, maxTokens = 512) {
-  const res = await fetch("/api/llm", {
+  const res = await fetch("/api/openai", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ prompt, maxTokens }),

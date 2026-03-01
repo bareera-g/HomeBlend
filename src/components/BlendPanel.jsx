@@ -42,7 +42,7 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
     try {
       const result = await generateBlendAnalysis({ members, votes, properties, rankedProperties });
       if (result) setLlmData(result);
-      else setLlmError("Could not generate insights — Gemini returned an empty response");
+      else setLlmError("Could not generate insights — OpenAI returned an empty response");
     } catch (e) {
       setLlmError(e.message);
     } finally {
@@ -108,7 +108,7 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
         )}
         {!isLLMReady && (
           <div style={{ marginTop: 8, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted }}>
-            Add <code style={{ fontFamily: "monospace", fontSize: 9 }}>GEMINI_API_KEY</code> to .env.local for AI insights.
+            Add <code style={{ fontFamily: "monospace", fontSize: 9 }}>OPENAI_API_KEY</code> to .env.local for AI insights.
           </div>
         )}
         {llmError && <div style={{ marginTop: 6, fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: "#C0624A" }}>{llmError}</div>}

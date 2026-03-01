@@ -12,7 +12,7 @@ function openaiProxyPlugin() {
     },
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (req.url !== "/api/llm") return next();
+        if (req.url !== "/api/openai") return next();
         if (req.method === "OPTIONS") {
           res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "content-type" });
           return res.end();
@@ -30,7 +30,7 @@ function openaiProxyPlugin() {
           res.end(JSON.stringify(obj));
         };
 
-        if (!apiKey) return json(500, { error: "OPENAI_API_KEY is not set in .env — add it and restart the dev server" });
+        if (!apiKey) return json(500, { error: "OPENAI_API_KEY is not set in .env.local — add it and restart the dev server" });
 
         try {
           const { prompt, maxTokens = 800 } = JSON.parse(body);
@@ -51,9 +51,11 @@ function openaiProxyPlugin() {
           if (!apiRes.ok) {
             const err = await apiRes.json().catch(() => ({}));
             const s = apiRes.status;
-            const msg = s === 400 ? "Invalid request to OpenAI"
-                      : s === 401 ? "OpenAI API key is invalid or unauthorized"
+            const msg = s === 400 ? "Invalid request to OpenAI API"
+                      : s === 401 ? "OpenAI API key is invalid — check OPENAI_API_KEY in .env.local"
+                      : s === 403 ? "OpenAI API key does not have access to this model"
                       : s === 429 ? "OpenAI rate limit exceeded — wait a moment and retry"
+                      : s === 500 || s === 503 ? "OpenAI is temporarily unavailable — try again shortly"
                       : `OpenAI API error (${s})`;
             return json(s, { error: msg, detail: err });
           }

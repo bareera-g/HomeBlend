@@ -7,7 +7,7 @@ import { generatePicksAnalysis, isLLMReady } from "../lib/llm.js";
    GroupPicksPanel
    Shows every room property scored against each member's taste profile,
    with named justifications and friction points.
-   LLM enhances the copy when VITE_GEMINI_API_KEY is set.
+   LLM enhances the copy when OPENAI_API_KEY is set.
 ═══════════════════════════════════════════════════════════════════════════ */
 export default function GroupPicksPanel({ members = [], votes = [], properties = [] }) {
   const [llmPicks,    setLlmPicks]    = useState(null);
@@ -87,7 +87,7 @@ export default function GroupPicksPanel({ members = [], votes = [], properties =
     try {
       const result = await generatePicksAnalysis({ members, votes, properties, scoredProperties });
       if (result) setLlmPicks(result);
-      else setLlmError("Could not generate picks — Gemini returned an empty response");
+      else setLlmError("Could not generate picks — OpenAI returned an empty response");
     } catch (e) {
       setLlmError(e.message);
     } finally {
