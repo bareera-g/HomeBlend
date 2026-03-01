@@ -370,21 +370,26 @@ export default function RoomView() {
       {/* ── Body ─────────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-        {/* ─── LEFT: Room property list ─────────────────────────────────── */}
+        {/* ─── LEFT: Live Leaderboard ───────────────────────────────────── */}
         <div style={{ width: 390, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: `1px solid ${B.border}`, overflow: "hidden" }}>
 
           {/* Sub-header */}
-          <div style={{ padding: "13px 16px 12px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.92)", flexShrink: 0 }}>
+          <div style={{ padding: "13px 16px 12px", borderBottom: `1px solid ${B.border}`, background: "rgba(251,247,241,0.95)", flexShrink: 0 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 500, color: B.ink }}>Room Properties</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 19, fontWeight: 500, color: B.ink }}>Live Leaderboard</div>
+                  {/* Live pulse dot */}
+                  {totalVotes > 0 && (
+                    <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#5C8A6B", boxShadow: "0 0 0 0 rgba(92,138,107,0.4)", animation: "pulse 2s infinite" }} />
+                  )}
+                </div>
                 <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 10, color: B.muted, marginTop: 2 }}>
                   {roomProperties.length} {roomProperties.length === 1 ? "property" : "properties"} · {totalVotes} vote{totalVotes !== 1 ? "s" : ""}
                 </div>
               </div>
               <button onClick={() => setShowAddDrawer(true)} style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "7px 13px", borderRadius: 8,
+                display: "flex", alignItems: "center", gap: 5, padding: "7px 13px", borderRadius: 8,
                 border: `1px solid ${B.border}`, background: B.goldBg, color: B.gold,
                 fontFamily: "'DM Sans', sans-serif", fontSize: 11, fontWeight: 600, cursor: "pointer",
               }}>
@@ -392,10 +397,11 @@ export default function RoomView() {
                 Add
               </button>
             </div>
+            {/* Voting progress bar */}
             {roomProperties.length > 0 && members.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(0,0,0,0.06)", overflow: "hidden" }}>
-                  <div style={{ width: `${voteProgress}%`, height: "100%", background: B.gold, borderRadius: 2, transition: "width 0.5s ease" }} />
+                <div style={{ flex: 1, height: 3, borderRadius: 2, background: "rgba(0,0,0,0.06)", overflow: "hidden" }}>
+                  <div style={{ width: `${voteProgress}%`, height: "100%", background: B.gold, borderRadius: 2, transition: "width 0.6s ease" }} />
                 </div>
                 <span style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.muted, whiteSpace: "nowrap" }}>
                   {voterCount}/{members.length} voted
@@ -404,46 +410,66 @@ export default function RoomView() {
             )}
           </div>
 
-          {/* Property list */}
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 13px 28px", display: "flex", flexDirection: "column", gap: 11 }}>
+          {/* Leaderboard list — sorted by net vote score */}
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "10px 12px 28px", display: "flex", flexDirection: "column", gap: 9 }}>
             {roomProperties.length === 0 ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "48px 24px" }}>
-                <div style={{ width: 56, height: 56, borderRadius: "50%", background: "rgba(166,124,61,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
-                  <Icon d={IC.home} size={24} color={B.gold} sw={1.2} />
+                <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(166,124,61,0.08)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 14 }}>
+                  <Icon d={IC.home} size={22} color={B.gold} sw={1.2} />
                 </div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 22, color: B.ink, marginBottom: 8 }}>No properties yet</div>
-                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, lineHeight: 1.7, maxWidth: 220, marginBottom: 20 }}>
-                  Add properties for your group to vote on. The blend updates live as votes come in.
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 20, color: B.ink, marginBottom: 7 }}>No properties yet</div>
+                <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 11, color: B.muted, lineHeight: 1.7, maxWidth: 200, marginBottom: 18 }}>
+                  Add properties and vote — the leaderboard updates live.
                 </div>
-                <button onClick={() => setShowAddDrawer(true)} style={{
-                  display: "flex", alignItems: "center", gap: 7,
-                  padding: "10px 20px", borderRadius: 9, background: B.ink, border: "none",
-                  color: "#FAF6EE", fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer",
-                }}>
+                <button onClick={() => setShowAddDrawer(true)} style={{ display: "flex", alignItems: "center", gap: 7, padding: "10px 20px", borderRadius: 9, background: B.ink, border: "none", color: "#FAF6EE", fontFamily: "'DM Sans', sans-serif", fontSize: 12, fontWeight: 500, cursor: "pointer" }}>
                   <Icon d={IC.plus} size={13} color="#FAF6EE" sw={2} />
                   Browse Properties
                 </button>
               </div>
-            ) : (
-              roomProperties.map(p => {
+            ) : (() => {
+              // Sort by net score descending, then by title as tiebreaker
+              const scored = roomProperties.map(p => {
+                const pvotes = votesFor(p.id);
+                const score  = pvotes.reduce((s, v) => s + (v.vote === 1 ? 1 : -1), 0);
+                const likes  = pvotes.filter(v => v.vote === 1).length;
+                const dislikes = pvotes.filter(v => v.vote === -1).length;
+                return { p, score, likes, dislikes };
+              }).sort((a, b) => b.score - a.score || b.likes - a.likes || a.p.title.localeCompare(b.p.title));
+
+              return scored.map(({ p, score, likes, dislikes }, rank) => {
                 const meta = roomPropMeta.find(r => r.property_id === p.id);
+                const rankColor = rank === 0 ? "#A67C3D" : rank === 1 ? "#8C9BAB" : rank === 2 ? "#9B7553" : B.muted;
+                const rankBg    = rank === 0 ? "rgba(166,124,61,0.12)" : rank === 1 ? "rgba(140,155,171,0.1)" : rank === 2 ? "rgba(155,117,83,0.1)" : "transparent";
                 return (
-                  <RoomPropertyCard
-                    key={p.id}
-                    property={p}
-                    votes={votesFor(p.id)}
-                    myVote={myVotes[p.id] ?? null}
-                    addedBy={meta?.added_by}
-                    members={members}
-                    isSelected={selected?.id === p.id}
-                    onSelect={() => setSelected(prev => prev?.id === p.id ? null : p)}
-                    onVote={vote => handleVote(p.id, vote)}
-                    onRemove={() => handleRemoveProperty(p.id)}
-                    canRemove={meta?.added_by === user?.id || room?.created_by === user?.id}
-                  />
+                  <div key={p.id} style={{ position: "relative" }}>
+                    {/* Rank badge */}
+                    <div style={{
+                      position: "absolute", top: 9, left: 9, zIndex: 2,
+                      width: 22, height: 22, borderRadius: "50%",
+                      background: rankBg, border: `1.5px solid ${rankColor}55`,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: rankColor,
+                    }}>
+                      {rank + 1}
+                    </div>
+                    <RoomPropertyCard
+                      property={p}
+                      votes={votesFor(p.id)}
+                      myVote={myVotes[p.id] ?? null}
+                      addedBy={meta?.added_by}
+                      members={members}
+                      isSelected={selected?.id === p.id}
+                      onSelect={() => setSelected(prev => prev?.id === p.id ? null : p)}
+                      onVote={vote => handleVote(p.id, vote)}
+                      onRemove={() => handleRemoveProperty(p.id)}
+                      canRemove={meta?.added_by === user?.id || room?.created_by === user?.id}
+                      score={score}
+                      rank={rank}
+                    />
+                  </div>
                 );
-              })
-            )}
+              });
+            })()}
           </div>
         </div>
 
