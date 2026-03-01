@@ -1,10 +1,10 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { B, Icon, IC, blendColor } from "../Brand.jsx";
-import { computeBlend, FEATURE_KEYS, FEATURE_LABELS } from "../lib/blendAlgorithm.js";
+import { computeBlend, FEATURE_LABELS } from "../lib/blendAlgorithm.js";
 import { generateBlendAnalysis, isLLMReady } from "../lib/llm.js";
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   BlendPanel — live group analysis with Venn diagram + LLM insights
+   BlendPanel — live group analysis with LLM insights
    Props:
      members    – blend_members rows (auth_user_id, display_name, avatar_color)
      votes      – normalised vote rows (user_id, property_id, vote = 1/-1)
@@ -127,13 +127,6 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
           </div>
         )}
 
-        {/* ── Venn Diagram ─────────────────────────────────────────────────── */}
-        {hasVotes && members.length >= 1 && (
-          <section>
-            <SectionLabel>Preference Overlap</SectionLabel>
-            <VennDiagram memberInsights={memberInsights} />
-          </section>
-        )}
 
         {/* ── LLM Compatibility narrative ──────────────────────────────────── */}
         {llmData?.compatibility && (
@@ -327,109 +320,6 @@ export default function BlendPanel({ members = [], votes = [], properties = [], 
   );
 }
 
-// ─── Venn Diagram ─────────────────────────────────────────────────────────────
-function VennDiagram({ memberInsights }) {
-  const n = Math.min(memberInsights.length, 3);
-  if (n === 0) return null;
-
-  const threshold = 0.4;
-
-  function memberFeatures(mi) {
-    return FEATURE_KEYS.filter(k => (mi.tasteVec?.[k] || 0) > threshold);
-  }
-
-  const featureSets = memberInsights.slice(0, 3).map(memberFeatures);
-
-  if (n === 1) {
-    const features = featureSets[0];
-    const m = memberInsights[0];
-    return (
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "16px 0" }}>
-        <svg width="180" height="180" viewBox="0 0 180 180">
-          <circle cx="90" cy="90" r="72" fill={m.avatarColor || B.gold} fillOpacity="0.12" stroke={m.avatarColor || B.gold} strokeWidth="2" />
-          <text x="90" y="86" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="11" fontWeight="700" fill={m.avatarColor || B.gold}>
-            {(m.displayName || "You").split(" ")[0]}
-          </text>
-        </svg>
-        {features.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 5, justifyContent: "center", marginTop: 8 }}>
-            {features.map(k => <FeatureChip key={k} label={FEATURE_LABELS[k]} color={m.avatarColor} />)}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  if (n === 2) {
-    const [fa, fb] = featureSets;
-    const ma = memberInsights[0];
-    const mb = memberInsights[1];
-    const shared   = fa.filter(k => fb.includes(k));
-    const uniqueA  = fa.filter(k => !fb.includes(k));
-    const uniqueB  = fb.filter(k => !fa.includes(k));
-    return (
-      <div>
-        <svg width="100%" viewBox="0 0 320 160" style={{ display: "block", overflow: "visible" }}>
-          {/* Circle A */}
-          <circle cx="120" cy="80" r="74" fill={ma.avatarColor || B.gold} fillOpacity="0.13" stroke={ma.avatarColor || B.gold} strokeWidth="1.5" />
-          {/* Circle B */}
-          <circle cx="200" cy="80" r="74" fill={mb.avatarColor || "#5C8A6B"} fillOpacity="0.13" stroke={mb.avatarColor || "#5C8A6B"} strokeWidth="1.5" />
-          {/* Labels */}
-          <text x="78" y="76" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="10" fontWeight="700" fill={ma.avatarColor || B.gold}>
-            {(ma.displayName || "A").split(" ")[0]}
-          </text>
-          <text x="242" y="76" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="10" fontWeight="700" fill={mb.avatarColor || "#5C8A6B"}>
-            {(mb.displayName || "B").split(" ")[0]}
-          </text>
-          <text x="160" y="76" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="8.5" fontWeight="600" fill={B.ink} fillOpacity="0.7">
-            Both
-          </text>
-        </svg>
-        {/* Feature labels below */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, padding: "0 4px" }}>
-          <FeatureList features={uniqueA} color={ma.avatarColor} label={(ma.displayName||"A").split(" ")[0]} />
-          <FeatureList features={shared} color={B.ink} label="Shared" center />
-          <FeatureList features={uniqueB} color={mb.avatarColor} label={(mb.displayName||"B").split(" ")[0]} right />
-        </div>
-      </div>
-    );
-  }
-
-  // 3 members
-  const [fa, fb, fc] = featureSets;
-  const ma = memberInsights[0], mb = memberInsights[1], mc = memberInsights[2];
-  const abc = fa.filter(k => fb.includes(k) && fc.includes(k));
-  const abOnly = fa.filter(k => fb.includes(k) && !fc.includes(k));
-  const onlyA = fa.filter(k => !fb.includes(k) && !fc.includes(k));
-  const onlyB = fb.filter(k => !fa.includes(k) && !fc.includes(k));
-  const onlyC = fc.filter(k => !fa.includes(k) && !fb.includes(k));
-  return (
-    <div>
-      <svg width="100%" viewBox="0 0 300 220" style={{ display: "block" }}>
-        <circle cx="150" cy="80"  r="70" fill={ma.avatarColor || B.gold}      fillOpacity="0.14" stroke={ma.avatarColor || B.gold}      strokeWidth="1.5" />
-        <circle cx="100" cy="165" r="70" fill={mb.avatarColor || "#5C8A6B"}   fillOpacity="0.14" stroke={mb.avatarColor || "#5C8A6B"}   strokeWidth="1.5" />
-        <circle cx="200" cy="165" r="70" fill={mc.avatarColor || "#7B6FA0"}   fillOpacity="0.14" stroke={mc.avatarColor || "#7B6FA0"}   strokeWidth="1.5" />
-        <text x="150" y="52"  textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="9.5" fontWeight="700" fill={ma.avatarColor || B.gold}>{(ma.displayName||"A").split(" ")[0]}</text>
-        <text x="66"  y="190" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="9.5" fontWeight="700" fill={mb.avatarColor || "#5C8A6B"}>{(mb.displayName||"B").split(" ")[0]}</text>
-        <text x="234" y="190" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="9.5" fontWeight="700" fill={mc.avatarColor || "#7B6FA0"}>{(mc.displayName||"C").split(" ")[0]}</text>
-        {abc.length > 0 && (
-          <text x="150" y="133" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="7.5" fill={B.ink} fillOpacity="0.65">{abc.map(k => FEATURE_LABELS[k]).join(", ")}</text>
-        )}
-        {abOnly.length > 0 && (
-          <text x="120" y="112" textAnchor="middle" fontFamily="'DM Sans',sans-serif" fontSize="7" fill={B.ink} fillOpacity="0.55">{abOnly.map(k => FEATURE_LABELS[k]).slice(0,2).join(", ")}</text>
-        )}
-      </svg>
-      {/* Legend */}
-      <div style={{ display: "flex", justifyContent: "center", gap: 6, flexWrap: "wrap", padding: "4px 8px" }}>
-        {abc.length > 0 && <FeatureChip label={`All: ${abc.map(k=>FEATURE_LABELS[k]).join(", ")}`} color={B.ink} />}
-        {onlyA.length > 0 && <FeatureChip label={`${(ma.displayName||"A").split(" ")[0]}: ${onlyA.map(k=>FEATURE_LABELS[k]).join(", ")}`} color={ma.avatarColor} />}
-        {onlyB.length > 0 && <FeatureChip label={`${(mb.displayName||"B").split(" ")[0]}: ${onlyB.map(k=>FEATURE_LABELS[k]).join(", ")}`} color={mb.avatarColor} />}
-        {onlyC.length > 0 && <FeatureChip label={`${(mc.displayName||"C").split(" ")[0]}: ${onlyC.map(k=>FEATURE_LABELS[k]).join(", ")}`} color={mc.avatarColor} />}
-      </div>
-    </div>
-  );
-}
-
 // ─── Small components ─────────────────────────────────────────────────────────
 function SectionLabel({ children, color }) {
   return (
@@ -448,30 +338,6 @@ function SmallAvatar({ color, label, size = 28 }) {
       boxShadow: "0 2px 6px rgba(80,50,10,0.14)",
     }}>
       {(label || "?")[0]?.toUpperCase()}
-    </div>
-  );
-}
-
-function FeatureChip({ label, color }) {
-  return (
-    <span style={{
-      padding: "3px 9px", borderRadius: 20, fontFamily: "'DM Sans', sans-serif",
-      fontSize: 9.5, fontWeight: 600, color: color || B.ink,
-      background: `${color || B.ink}14`, border: `1px solid ${color || B.ink}28`,
-    }}>{label}</span>
-  );
-}
-
-function FeatureList({ features, color, label, center, right }) {
-  return (
-    <div style={{ textAlign: center ? "center" : right ? "right" : "left" }}>
-      <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, fontWeight: 700, color: color || B.muted, letterSpacing: 1, textTransform: "uppercase", marginBottom: 5 }}>{label}</div>
-      {features.length === 0
-        ? <div style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9, color: B.muted, fontStyle: "italic" }}>—</div>
-        : features.map(k => (
-          <div key={k} style={{ fontFamily: "'DM Sans', sans-serif", fontSize: 9.5, color: B.inkSoft, marginBottom: 3 }}>{FEATURE_LABELS[k]}</div>
-        ))
-      }
     </div>
   );
 }
