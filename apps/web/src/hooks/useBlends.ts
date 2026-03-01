@@ -106,6 +106,20 @@ export async function respondToJoinRequest(
   return { error: error?.message ?? null };
 }
 
+/** Permanently deletes a blend the caller owns. */
+export async function deleteBlend(
+  blendId: string,
+): Promise<{ error: string | null }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any)
+    .from("blends")
+    .delete()
+    .eq("id", blendId);
+
+  if (error) console.error("[deleteBlend]", error);
+  return { error: error?.message ?? null };
+}
+
 /**
  * Like or dislike a property within a blend.
  * Clicking the same vote a second time removes the vote (toggle).

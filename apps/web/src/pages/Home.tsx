@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useProperties } from "../hooks/useProperties";
 import { useBlends, addPropertyToBlend } from "../hooks/useBlends";
@@ -23,7 +23,7 @@ export default function Home() {
   const navigate = useNavigate();
   const { properties, loading, error } = useProperties();
   const { user, authLoading, signOut, openAuthModal } = useAuth();
-  const { blends, loading: blendsLoading } = useBlends();
+  const { blends, loading: blendsLoading, reload: reloadBlends } = useBlends();
 
   const [search,       setSearch]       = useState("");
   const [selectedId,   setSelectedId]   = useState<string | null>(null);
@@ -31,16 +31,17 @@ export default function Home() {
   const [maxRent,      setMaxRent]      = useState(5000);
   const [roomsFilter,  setRoomsFilter]  = useState<number | "">("");
   const [savedOpen,    setSavedOpen]    = useState(false);
-  const [newBlendName, setNewBlendName] = useState("");
   const [joinCode,     setJoinCode]     = useState("");
   const [roomsLoading, setRoomsLoading] = useState(false);
 
   // Drag-and-drop state
-  const [dragPropertyId,    setDragPropertyId]    = useState<string | null>(null);
-  const [dragOverBlendId,   setDragOverBlendId]   = useState<string | null>(null);
-  const [dropSuccessId,     setDropSuccessId]     = useState<string | null>(null);
-  const [dragOverNewBlend,  setDragOverNewBlend]  = useState(false);
-  const [creatingFromDrop,  setCreatingFromDrop]  = useState(false);
+  const [dragPropertyId,       setDragPropertyId]       = useState<string | null>(null);
+  const [dragOverBlendId,      setDragOverBlendId]      = useState<string | null>(null);
+  const [dropSuccessId,        setDropSuccessId]        = useState<string | null>(null);
+  const [dragOverNewBlend,     setDragOverNewBlend]     = useState(false);
+  // When user drops onto "create new room", we pause and show a naming island
+  const [pendingDropPropertyId, setPendingDropPropertyId] = useState<string | null>(null);
+  const pendingDropRef = useRef<string | null>(null); // sync ref so handleDragEnd can read it
 
   const cardsRef = useRef<HTMLDivElement>(null);
   const [blendPropertyId, setBlendPropertyId] = useState<string | null>(null);
@@ -91,7 +92,8 @@ export default function Home() {
   function handleDragEnd() {
     setDragPropertyId(null);
     setDragOverBlendId(null);
-    setSavedOpen(false);
+    // Keep panel open if we're waiting for the user to name a new room from a drop
+    if (!pendingDropRef.current) setSavedOpen(false);
   }
 
   async function handleDropOnBlend(blendId: string) {
@@ -105,34 +107,27 @@ export default function Home() {
     setDragPropertyId(null);
   }
 
-  async function handleDropCreateBlend() {
-    if (!dragPropertyId || !user) return;
+  function handleDropCreateBlend() {
+    if (!dragPropertyId) return;
     setDragOverNewBlend(false);
-    setCreatingFromDrop(true);
-    const propName = properties.find((p) => p.id === dragPropertyId)?.name ?? "New Room";
-    const roomName = `${propName.split(" ").slice(0, 2).join(" ")} Room`;
-    const { createBlend: cb } = await import("../hooks/useBlends");
-    const { id: newBlendId, error: createErr } = await cb(roomName);
-    if (!createErr && newBlendId) {
-      await addPropertyToBlend(newBlendId, dragPropertyId, user.id);
-      setCreatingFromDrop(false);
-      setDragPropertyId(null);
-      setSavedOpen(false);
-      navigate(`/blend/${newBlendId}`);
-    } else {
-      setCreatingFromDrop(false);
-      setDragPropertyId(null);
-    }
+    // Store the property ID synchronously so handleDragEnd can see it
+    pendingDropRef.current = dragPropertyId;
+    setPendingDropPropertyId(dragPropertyId);
+    // Drag state cleared; panel stays open (handleDragEnd checks pendingDropRef)
   }
 
-  async function handleCreateRoom() {
-    if (!newBlendName.trim() || !user) return;
-    setRoomsLoading(true);
-    const { createBlend: cb } = await import("../hooks/useBlends");
-    await cb(newBlendName.trim());
-    setNewBlendName("");
-    setRoomsLoading(false);
-  }
+  const handleDropCreateDone = useCallback(async (blendId: string) => {
+    const propId = pendingDropRef.current;
+    pendingDropRef.current = null;
+    setPendingDropPropertyId(null);
+    // "__cancel__" sentinel means the user dismissed the naming island
+    if (blendId === "__cancel__") { setSavedOpen(false); return; }
+    setSavedOpen(false);
+    if (propId && user) {
+      await addPropertyToBlend(blendId, propId, user.id);
+    }
+    navigate(`/blend/${blendId}`);
+  }, [user, navigate]);
 
   async function handleJoinRoom() {
     if (!joinCode.trim() || !user) return;
@@ -371,18 +366,17 @@ export default function Home() {
             dragOverBlendId={dragOverBlendId}
             dropSuccessId={dropSuccessId}
             dragOverNewBlend={dragOverNewBlend}
-            creatingFromDrop={creatingFromDrop}
-            newBlendName={newBlendName}
+            pendingDropPropertyId={pendingDropPropertyId}
+            onDropCreateDone={handleDropCreateDone}
             joinCode={joinCode}
             roomsLoading={roomsLoading}
             onClose={() => setSavedOpen(false)}
+            onReload={reloadBlends}
             onSetDragOverBlendId={setDragOverBlendId}
             onSetDragOverNewBlend={setDragOverNewBlend}
             onDropOnBlend={handleDropOnBlend}
             onDropCreateBlend={handleDropCreateBlend}
-            onSetNewBlendName={setNewBlendName}
             onSetJoinCode={setJoinCode}
-            onCreateRoom={handleCreateRoom}
             onJoinRoom={handleJoinRoom}
           />
         )}
